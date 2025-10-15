@@ -138,6 +138,9 @@ use_repo(qemu, "qemu_opentitan")
 doxygen = use_extension("//third_party/doxygen:extensions.bzl", "doxygen")
 use_repo(doxygen, "doxygen")
 
+mlkem_native = use_extension("//third_party/mlkem_native:extensions.bzl", "mlkem_native")
+use_repo(mlkem_native, "mlkem_native")
+
 # Extension for linking in externally managed test and provisioning customizations
 # for both secure/non-secure manufacturer domains.
 hooks = use_extension("//rules:extensions.bzl", "hooks")
