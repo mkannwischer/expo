@@ -7867,6 +7867,6 @@ opentitan_test(
         "//sw/device/lib/testing:otbn_testutils",
         "//sw/device/lib/testing:profile",
         "//sw/device/lib/testing/test_framework:ottf_main",
-        "//sw/device/lib/crypto/impl/mlkem:mlkem_native",
+        "//sw/device/lib/crypto/impl:mlkem",
     ],
 )
