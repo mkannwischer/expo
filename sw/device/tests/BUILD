@@ -7726,28 +7726,3 @@ opentitan_test(
         "//sw/device/lib/testing/test_framework:status",
     ],
 )
-
-opentitan_test(
-    name = "mlkem_native_test",
-    srcs = ["mlkem_native_test.c"],
-    exec_env = dicts.add(
-        EARLGREY_TEST_ENVS,
-        EARLGREY_SILICON_OWNER_ROM_EXT_ENVS,
-        {
-            "//hw/top_earlgrey:fpga_cw310_sival": None,
-            "//hw/top_earlgrey:fpga_cw310_sival_rom_ext": None,
-            "//hw/top_earlgrey:silicon_creator": None,
-        },
-    ),
-    verilator = verilator_params(timeout = "eternal"),
-    deps = [
-        "//hw/top_earlgrey/sw/autogen:top_earlgrey",
-        "//sw/device/lib/runtime:ibex",
-        "//sw/device/lib/runtime:log",
-        "//sw/device/lib/testing:entropy_testutils",
-        "//sw/device/lib/testing:otbn_testutils",
-        "//sw/device/lib/testing:profile",
-        "//sw/device/lib/testing/test_framework:ottf_main",
-        "//sw/device/lib/crypto/impl:mlkem",
-    ],
-)
