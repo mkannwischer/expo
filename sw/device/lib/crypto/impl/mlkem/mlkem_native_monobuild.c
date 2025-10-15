@@ -7,10 +7,6 @@
  * imported into the individual builds below via MLK_CHECK_APIS. */
 #include "mlkem_native_monobuild.h"
 
-/* Include mlkem_native.h into each level-build to ensure consistency
- * with kem.h and mlkem_native_all.h above. */
-//#define MLK_CHECK_APIS
-
 /* Three instances of mlkem-native for all security levels */
 
 /* Include level-independent code */

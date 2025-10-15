@@ -11,8 +11,7 @@
 
 #define SHAKE128_RATE 168
 
-/* TODO: figure out the minimum value for this */
-#define MLK_SHAKE128_MAX_INPUT_LENGTH 1024
+#define MLK_SHAKE128_MAX_INPUT_LENGTH 64
 typedef struct
 {
   uint8_t input[MLK_SHAKE128_MAX_INPUT_LENGTH];

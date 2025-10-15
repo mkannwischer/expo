@@ -7849,10 +7849,6 @@ opentitan_test(
 opentitan_test(
     name = "mlkem_native_test",
     srcs = ["mlkem_native_test.c"],
-    copts = [
-        "-Wno-unused-result",
-        "-Wno-error",
-    ],
     exec_env = dicts.add(
         EARLGREY_TEST_ENVS,
         EARLGREY_SILICON_OWNER_ROM_EXT_ENVS,

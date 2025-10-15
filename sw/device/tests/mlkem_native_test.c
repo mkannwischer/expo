@@ -29,18 +29,16 @@ static void test_mlkem_native_512(void){
       0xdf, 0xf1, 0x4a, 0xbb, 0x27, 0xea, 0x46, 0x06, 0x46, 0x3c};
 
   t0 = profile_start();
-  mlkem512_keypair_derand(pk, sk, coins);
+  CHECK(mlkem512_keypair_derand(pk, sk, coins) == 0);
   profile_end_and_print(t0, "mlkem512_keypair_derand");
 
   t0 = profile_start();
-  mlkem512_enc_derand(ct, key_b, pk, coinsE);
+  CHECK(mlkem512_enc_derand(ct, key_b, pk, coinsE) == 0);
   profile_end_and_print(t0, "mlkem512_enc_derand");
 
-
   t0 = profile_start();
-  mlkem512_dec(key_a, ct, sk);
+  CHECK(mlkem512_dec(key_a, ct, sk) == 0);
   profile_end_and_print(t0, "mlkem512_dec");
-
 
   CHECK_ARRAYS_EQ(key_a, key_b, MLKEM512_BYTES);
   CHECK_ARRAYS_EQ(key_a, expected_key, MLKEM512_BYTES);
@@ -63,16 +61,15 @@ static void test_mlkem_native_768(void){
       0xa4, 0xba, 0xb3, 0xa6, 0x82, 0x46, 0x63, 0x0d, 0xb0, 0x8b};
 
   t0 = profile_start();
-  mlkem768_keypair_derand(pk, sk, coins);
+  CHECK(mlkem768_keypair_derand(pk, sk, coins) == 0);
   profile_end_and_print(t0, "mlkem768_keypair_derand");
 
   t0 = profile_start();
-  mlkem768_enc_derand(ct, key_b, pk, coinsE);
+  CHECK(mlkem768_enc_derand(ct, key_b, pk, coinsE) == 0);
   profile_end_and_print(t0, "mlkem768_enc_derand");
 
-
   t0 = profile_start();
-  mlkem768_dec(key_a, ct, sk);
+  CHECK(mlkem768_dec(key_a, ct, sk) == 0);
   profile_end_and_print(t0, "mlkem768_dec");
 
 
@@ -97,16 +94,15 @@ static void test_mlkem_native_1024(void){
       0x4e, 0xdc, 0x8a, 0xc7, 0x92, 0xe5, 0x73, 0x0d, 0xdd, 0x85};
 
   t0 = profile_start();
-  mlkem1024_keypair_derand(pk, sk, coins);
+  CHECK(mlkem1024_keypair_derand(pk, sk, coins) == 0);
   profile_end_and_print(t0, "mlkem1024_keypair_derand");
 
   t0 = profile_start();
-  mlkem1024_enc_derand(ct, key_b, pk, coinsE);
+  CHECK(mlkem1024_enc_derand(ct, key_b, pk, coinsE) == 0);
   profile_end_and_print(t0, "mlkem1024_enc_derand");
 
-
   t0 = profile_start();
-  mlkem1024_dec(key_a, ct, sk);
+  CHECK(mlkem1024_dec(key_a, ct, sk) == 0);
   profile_end_and_print(t0, "mlkem1024_dec");
 
   CHECK_ARRAYS_EQ(key_a, key_b, MLKEM1024_BYTES);
