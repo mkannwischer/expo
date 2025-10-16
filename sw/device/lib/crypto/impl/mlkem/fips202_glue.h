@@ -49,7 +49,7 @@ static MLK_INLINE void mlk_shake128_squeezeblocks(uint8_t *output, size_t nblock
   otcrypto_hash_digest_t md = {
     .data = (uint32_t *)tmp,
     .len = sizeof(tmp) / 4,
-    .mode = kOtcryptoHashXofModeShake256
+    .mode = kOtcryptoHashXofModeShake128
   };
 
   otcrypto_const_byte_buf_t d = {
