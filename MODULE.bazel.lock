@@ -573,6 +573,35 @@
         ]
       }
     },
+    "//third_party/mldsa_native:extensions.bzl%mldsa_native": {
+      "general": {
+        "bzlTransitiveDigest": "3VdJsQC3+WIiIIp7McQP+R08e0p7CUXl6AF+rEEH3Po=",
+        "usagesDigest": "4rdFe72MNnFSMIg7Xo/0lZ9ySu4EWs7yUMdF7a0JkI4=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "mldsa_native": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "build_file": "@@//third_party/mldsa_native:BUILD.mldsa_native.bazel",
+              "sha256": "02f22e4b4509abc1b7bc539d7a4522be950eed72551361884c939d450eb52790",
+              "strip_prefix": "mldsa-native-3380c330162e2a998d9b5454ca1103ddac84c2e2",
+              "urls": [
+                "https://github.com/pq-code-package/mldsa-native/archive/3380c330162e2a998d9b5454ca1103ddac84c2e2.tar.gz"
+              ]
+            }
+          }
+        },
+        "recordedRepoMappingEntries": [
+          [
+            "",
+            "bazel_tools",
+            "bazel_tools"
+          ]
+        ]
+      }
+    },
     "//third_party/mlkem_native:extensions.bzl%mlkem_native": {
       "general": {
         "bzlTransitiveDigest": "kN7K0a14FAlVHwn9JwehYF9f0LW1s5+hkj1IMEc5Ues=",
