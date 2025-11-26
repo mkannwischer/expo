@@ -77,9 +77,9 @@ enum {
   kExponentF4 = 65537,
 };
 
-status_t rsa_modexp_wait(size_t *num_words) {
-  // Spin here waiting for OTBN to complete.
-  HARDENED_TRY(otbn_busy_wait_for_done());
+status_t rsa_modexp_get_result_size(size_t *num_words) {
+  // Return `OTCRYTPO_ASYNC_INCOMPLETE` if OTBN not done.
+  HARDENED_TRY(otbn_assert_idle());
 
   // Read the application mode.
   uint32_t mode;
@@ -119,9 +119,9 @@ static status_t rsa_modexp_finalize(const size_t num_words,
                                     const uint32_t min_insn_count,
                                     const uint32_t max_insn_count,
                                     uint32_t *result) {
-  // Wait for OTBN to complete and get the result size.
+  // Get the result size, failing if the OTBN isn't done.
   size_t num_words_inferred;
-  OTBN_WIPE_IF_ERROR(rsa_modexp_wait(&num_words_inferred));
+  OTBN_WIPE_IF_ERROR(rsa_modexp_get_result_size(&num_words_inferred));
 
   // Check that the inferred result size matches expectations.
   if (num_words != num_words_inferred) {
