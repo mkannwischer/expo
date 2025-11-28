@@ -118,6 +118,9 @@ p384_key_from_seed:
   bn.sel    w6, w11, w25, FG0.C
   bn.sub    w31, w31, w31  /* dummy instruction to clear flags */
 
+  /* Clear w25 before over writing it with a different share. */
+  bn.xor    w25, w25, w25
+
   /* Isolate the carry bit and shift it back into position.
        w25 <= x0[384] << 128 */
   bn.rshi   w25, w31, w21 >> 128
@@ -128,11 +131,11 @@ p384_key_from_seed:
   bn.xor    w21, w21, w25
 
   /* Conditionally subtract n to reduce.
-       [w21,w20] <= (x0 mod 2^384) mod n */
+       [w29,w28] <= (x0 mod 2^384) mod n */
   bn.sub    w26, w20, w16
   bn.subb   w27, w21, w17
-  bn.sel    w20, w20, w26, FG0.C
-  bn.sel    w21, w21, w27, FG0.C
+  bn.sel    w28, w20, w26, FG0.C
+  bn.sel    w29, w21, w27, FG0.C
 
   /* Compute the correction factor.
        [w25,w24] <= (x[384] << 384) mod n = c */
@@ -148,14 +151,14 @@ p384_key_from_seed:
      N.B. We also insert a dummy instruction after this step, as the flags set
      will reveal information regarding d0 in the case that the final conditional
      subtraction is performed. */
-  bn.add    w20, w20, w16
-  bn.addc   w21, w21, w17
-  bn.sub    w20, w20, w24
-  bn.subb   w21, w21, w25
-  bn.sub    w26, w20, w16
-  bn.subb   w27, w21, w17
-  bn.sel    w22, w20, w26, FG0.C
-  bn.sel    w23, w21, w27, FG0.C
+  bn.add    w28, w28, w16
+  bn.addc   w29, w29, w17
+  bn.sub    w28, w28, w24
+  bn.subb   w29, w29, w25
+  bn.sub    w26, w28, w16
+  bn.subb   w27, w29, w17
+  bn.sel    w22, w28, w26, FG0.C
+  bn.sel    w23, w29, w27, FG0.C
   bn.sub    w31, w31, w31  /* dummy instruction to clear flags */
 
   /* Get 63 bits of randomness from RND, multiply it with n,
@@ -168,6 +171,12 @@ p384_key_from_seed:
   jal       x1, mul384
   bn.mov    w1, w18
   bn.mov    w2, w19
+
+  /* Clear regs. */
+  bn.xor    w10, w10, w10
+  bn.xor    w11, w11, w11
+  bn.xor    w18, w18, w18
+  bn.xor    w19, w19, w19
 
   /* N.B. We clear flags after this step to prevent the flags from leaking
      information about d1'.
