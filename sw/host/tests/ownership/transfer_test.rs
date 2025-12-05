@@ -7,7 +7,6 @@ use anyhow::{Result, anyhow};
 use clap::Parser;
 use regex::Regex;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 use opentitanlib::app::TransportWrapper;
@@ -87,13 +86,13 @@ fn remember(haystack: &str, re: &str, memory: &mut Vec<String>) -> bool {
 
 fn transfer_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
     let uart = transport.uart("console")?;
-    let rescue = RescueSerial::new(Rc::clone(&uart));
+    let rescue = RescueSerial::new(uart.clone());
 
     let mut keygen = Vec::new();
 
     if opts.pre_transfer_boot_check {
         log::info!("###### Pre-transfer Boot Check ######");
-        let capture = UartConsole::wait_for(
+        let capture = UartConsole::wait_for_bytes(
             &*uart,
             r"(?msR)Running.*ownership_state = (\w+)$.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
             opts.timeout,
@@ -144,7 +143,7 @@ fn transfer_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
         // At this point, the device should be unlocked and should have accepted the owner
         // configuration.  Owner code should run and report the ownership state.
         transport.reset_target(Duration::from_millis(50), /*clear_uart=*/ true)?;
-        let capture = UartConsole::wait_for(
+        let capture = UartConsole::wait_for_bytes(
             &*uart,
             r"(?msR)Running.*ownership_state = (\w+)$.*ownership_transfers = (\d+)$.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
             opts.timeout,
@@ -187,7 +186,7 @@ fn transfer_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
     log::info!("###### Boot After Transfer Complete ######");
     // After the activate command, the device should report the ownership state as `OWND`.
     transport.reset_target(Duration::from_millis(50), /*clear_uart=*/ true)?;
-    let capture = UartConsole::wait_for(
+    let capture = UartConsole::wait_for_bytes(
         &*uart,
         r"(?msR)Running.*ownership_state = (\w+)$.*ownership_transfers = (\d+)$.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
         opts.timeout,

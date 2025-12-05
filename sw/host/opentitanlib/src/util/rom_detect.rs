@@ -20,17 +20,17 @@ impl RomDetect {
     pub fn new(bitstream: &[u8], timeout: Option<Duration>) -> Result<RomDetect> {
         Ok(RomDetect {
             usr_access: usr_access_get(bitstream)?,
-            console: UartConsole {
+            console: UartConsole::new(
                 timeout,
-                exit_success: Some(Regex::new(r"(\w*ROM):([^\r\n]+)[\r\n]").unwrap()),
-                ..Default::default()
-            },
+                Some(Regex::new(r"(\w*ROM):([^\r\n]+)[\r\n]").unwrap()),
+                None,
+            ),
         })
     }
 
     pub fn detect(&mut self, uart: &dyn Uart) -> Result<bool> {
         let t0 = Instant::now();
-        let rc = self.console.interact(uart, None, None)?;
+        let rc = self.console.interact(uart, None)?;
         let t1 = Instant::now();
         log::debug!("detect exit={:?}, duration={:?}", rc, t1 - t0);
         if let Some(cap) = self.console.captures(ExitStatus::ExitSuccess) {

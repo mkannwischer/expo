@@ -7,7 +7,6 @@ use anyhow::{Result, anyhow};
 use clap::Parser;
 use regex::Regex;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 use opentitanlib::app::TransportWrapper;
@@ -150,7 +149,7 @@ fn flash_info_check(info: &[FlashRegion<'_>], unlocked: bool) -> Result<()> {
 
 fn flash_permission_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
     let uart = transport.uart("console")?;
-    let rescue = RescueSerial::new(Rc::clone(&uart));
+    let rescue = RescueSerial::new(uart.clone());
 
     log::info!("###### Get Boot Log (1/2) ######");
     let (data, devid) = transfer_lib::get_device_info(transport, &rescue)?;
@@ -189,7 +188,7 @@ fn flash_permission_test(opts: &Opts, transport: &TransportWrapper) -> Result<()
         // The flash configuration will be the previous owner in Side A and
         // the new owner in SideB.
         transport.reset_target(Duration::from_millis(50), /*clear_uart=*/ true)?;
-        let capture = UartConsole::wait_for(
+        let capture = UartConsole::wait_for_bytes(
             &*uart,
             r"(?msR)Running(.*)Finished.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
             opts.timeout,
@@ -272,7 +271,7 @@ fn flash_permission_test(opts: &Opts, transport: &TransportWrapper) -> Result<()
     log::info!("###### Boot After Transfer Complete ######");
     // After the activate command, the device should report the ownership state as `OWND`.
     transport.reset_target(Duration::from_millis(50), /*clear_uart=*/ true)?;
-    let capture = UartConsole::wait_for(
+    let capture = UartConsole::wait_for_bytes(
         &*uart,
         r"(?msR)Running(.*)Finished.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
         opts.timeout,

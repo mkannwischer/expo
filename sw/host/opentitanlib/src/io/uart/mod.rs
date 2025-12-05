@@ -4,7 +4,6 @@
 
 use std::io::{self, Read};
 use std::rc::Rc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -15,8 +14,11 @@ use thiserror::Error;
 
 use crate::app::TransportWrapper;
 use crate::impl_serializable_error;
-use crate::io::console::ConsoleDevice;
+use crate::io::console::{ConsoleDevice, ConsoleExt};
 use crate::transport::TransportError;
+
+pub mod flow;
+pub mod serial;
 
 #[derive(Clone, Debug, Args, Serialize, Deserialize)]
 pub struct UartParams {
@@ -57,7 +59,7 @@ pub enum FlowControl {
 }
 
 /// A trait which represents a UART.
-pub trait Uart {
+pub trait Uart: ConsoleDevice {
     /// Returns the UART baudrate.  May return zero for virtual UARTs.
     fn get_baudrate(&self) -> Result<u32>;
 
@@ -83,31 +85,6 @@ pub trait Uart {
         Err(TransportError::UnsupportedOperation.into())
     }
 
-    /// Reads UART receive data into `buf`, returning the number of bytes read.
-    /// This function is blocking.
-    fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        crate::util::runtime::block_on(std::future::poll_fn(|cx| self.poll_read(cx, buf)))
-    }
-
-    /// Reads UART receive data into `buf`, returning the number of bytes read.
-    /// The `timeout` may be used to specify a duration to wait for data.
-    /// If timeout expires without any data arriving `Ok(0)` will be returned, never `Err(_)`.
-    fn read_timeout(&self, buf: &mut [u8], timeout: Duration) -> Result<usize> {
-        crate::util::runtime::block_on(async {
-            tokio::time::timeout(timeout, std::future::poll_fn(|cx| self.poll_read(cx, buf))).await
-        })
-        .unwrap_or(Ok(0))
-    }
-
-    /// Reads UART receive data into `buf`, returning the number of bytes read.
-    ///
-    /// If data is not yet ready, `Poll::Pending` will be returned and `cx` would be notified when it's available.
-    /// When this function is called with multiple wakers, all wakers should be notified instead of just the last one.
-    fn poll_read(&self, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<usize>>;
-
-    /// Writes data from `buf` to the UART.
-    fn write(&self, buf: &[u8]) -> Result<()>;
-
     /// Clears the UART RX buffer.
     fn clear_rx_buffer(&self) -> Result<()> {
         // Keep reading while until the RX buffer is empty.
@@ -116,10 +93,6 @@ pub trait Uart {
         let mut buf = [0u8; 256];
         while self.read_timeout(&mut buf, TIMEOUT)? > 0 {}
         Ok(())
-    }
-
-    fn set_break(&self, _enable: bool) -> Result<()> {
-        Err(TransportError::UnsupportedOperation.into())
     }
 
     fn set_parity(&self, _parity: Parity) -> Result<()> {
@@ -133,25 +106,7 @@ pub trait Uart {
 
 impl Read for &dyn Uart {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        Uart::read(&**self, buf).map_err(io::Error::other)
-    }
-}
-
-impl<'a> ConsoleDevice for dyn Uart + 'a {
-    fn console_poll_read(
-        &self,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> std::task::Poll<Result<usize>> {
-        self.poll_read(cx, buf)
-    }
-
-    fn console_write(&self, buf: &[u8]) -> Result<()> {
-        self.write(buf)
-    }
-
-    fn set_break(&self, enable: bool) -> Result<()> {
-        <Self as Uart>::set_break(self, enable)
+        ConsoleExt::read(&**self, buf).map_err(io::Error::other)
     }
 }
 

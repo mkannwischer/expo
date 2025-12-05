@@ -1,7 +1,7 @@
 // Copyright lowRISC contributors (OpenTitan project).
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use crc::{CRC_32_ISO_HDLC, Crc};
 use regex::Regex;
 use serde::Serialize;
@@ -32,14 +32,14 @@ where
     fn send(&self, device: &T) -> Result<()> {
         let s = serde_json::to_string(self)?;
         log::info!("Sending: {}", s);
-        device.console_write(s.as_bytes())?;
+        device.write(s.as_bytes())?;
         Ok(())
     }
 
     fn send_with_crc(&self, device: &T) -> Result<()> {
         let s = serde_json::to_string(self)?;
         log::info!("Sending: {}", s);
-        device.console_write(s.as_bytes())?;
+        device.write(s.as_bytes())?;
         let actual_crc = OttfCrc {
             crc: Crc::<u32>::new(&CRC_32_ISO_HDLC).checksum(s.as_bytes()),
         };
@@ -65,14 +65,11 @@ where
     where
         Self: Sized,
     {
-        let mut console = UartConsole {
-            timeout: Some(timeout),
-            timestamp: true,
-            newline: true,
-            exit_success: Some(Regex::new(r"RESP_OK:(.*) CRC:([0-9]+)\n")?),
-            exit_failure: Some(Regex::new(r"RESP_ERR:(.*) CRC:([0-9]+)\n")?),
-            ..Default::default()
-        };
+        let mut console = UartConsole::new(
+            Some(timeout),
+            Some(Regex::new(r"RESP_OK:(.*) CRC:([0-9]+)\n")?),
+            Some(Regex::new(r"RESP_ERR:(.*) CRC:([0-9]+)\n")?),
+        );
         let mut stdout = std::io::stdout();
         let out = if !quiet {
             let w: &mut dyn Write = &mut stdout;
@@ -80,7 +77,7 @@ where
         } else {
             None
         };
-        let result = console.interact(device, None, out)?;
+        let result = console.interact(device, out)?;
         println!();
         match result {
             ExitStatus::ExitSuccess => {
@@ -103,7 +100,6 @@ where
                 Err(err.into())
             }
             ExitStatus::Timeout => Err(ConsoleError::GenericError("Timed Out".into()).into()),
-            _ => Err(anyhow!("Impossible result: {:?}", result)),
         }
     }
 }

@@ -7,10 +7,13 @@ use clap::Args;
 use regex::Regex;
 use std::any::Any;
 use std::fs::File;
+use std::marker::Unpin;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use opentitanlib::app::TransportWrapper;
 use opentitanlib::app::command::CommandDispatch;
+use opentitanlib::io::console::ConsoleDevice;
 use opentitanlib::io::uart::UartParams;
 use opentitanlib::transport::Capability;
 use opentitanlib::uart::console::{ExitStatus, UartConsole};
@@ -52,6 +55,42 @@ pub struct Console {
     exit_failure: Option<String>,
 }
 
+const CTRL_B: u8 = 2;
+const CTRL_C: u8 = 3;
+
+/// Takes input from an input stream and send it to a console device. Breaks are handled.
+async fn process_input<T, R: AsyncRead + Unpin>(device: &T, stdin: &mut R) -> Result<()>
+where
+    T: ConsoleDevice + ?Sized,
+{
+    let mut break_en = false;
+    loop {
+        let mut buf = [0u8; 256];
+        let len = stdin.read(&mut buf).await?;
+        if len == 1 {
+            if buf[0] == CTRL_C {
+                return Ok(());
+            }
+            if buf[0] == CTRL_B {
+                break_en = !break_en;
+                eprint!(
+                    "\r\n{} break",
+                    if break_en { "Setting" } else { "Clearing" }
+                );
+                let b = device.set_break(break_en);
+                if b.is_err() {
+                    eprint!(": {:?}", b);
+                }
+                eprint!("\r\n");
+                continue;
+            }
+        }
+        if len > 0 {
+            device.write(&buf[..len])?;
+        }
+    }
+}
+
 impl CommandDispatch for Console {
     fn run(
         &self,
@@ -62,23 +101,19 @@ impl CommandDispatch for Console {
         transport.capabilities()?.request(Capability::UART).ok()?;
 
         // Set up resources specified by the command line parameters.
-        let mut console = UartConsole {
-            logfile: self.logfile.as_ref().map(File::create).transpose()?,
-            timeout: self.timeout,
-            exit_success: self
-                .exit_success
+        let mut console = UartConsole::new(
+            self.timeout,
+            self.exit_success
                 .as_ref()
                 .map(|s| Regex::new(s.as_str()))
                 .transpose()?,
-            exit_failure: self
-                .exit_failure
+            self.exit_failure
                 .as_ref()
                 .map(|s| Regex::new(s.as_str()))
                 .transpose()?,
-            timestamp: self.timestamp,
-            newline: true,
-            ..Default::default()
-        };
+        );
+        console.logfile = self.logfile.as_ref().map(File::create).transpose()?;
+        console.timestamp = self.timestamp;
 
         let status = {
             // Put the terminal into raw mode.  The tty guard will restore the
@@ -101,7 +136,22 @@ impl CommandDispatch for Console {
             }
 
             transport.relinquish_exclusive_access(|| {
-                console.interact(&*uart, stdin.as_mut().map(|x| x as _), Some(&mut stdout))
+                opentitanlib::util::runtime::block_on(async {
+                    let tx = async {
+                        if let Some(stdin) = stdin.as_mut() {
+                            process_input(&*uart, stdin).await
+                        } else {
+                            std::future::pending().await
+                        }
+                    };
+
+                    let rx = console.interact_async(&*uart, Some(&mut stdout));
+
+                    Result::<_>::Ok(tokio::select! {
+                        v = tx => Err(v?),
+                        v = rx => Ok(v?),
+                    })
+                })
             })??
         };
         if !self.non_interactive {
@@ -109,9 +159,9 @@ impl CommandDispatch for Console {
         }
 
         match status {
-            ExitStatus::None | ExitStatus::CtrlC => Ok(None),
-            ExitStatus::Timeout => {
-                if console.exit_success.is_some() {
+            Err(()) => Ok(None),
+            Ok(ExitStatus::Timeout) => {
+                if self.exit_success.is_some() {
                     // If there was a console exit success condition, then a timeout
                     // represents an error.
                     Err(anyhow!("Console timeout exceeded"))
@@ -121,17 +171,27 @@ impl CommandDispatch for Console {
                     Ok(None)
                 }
             }
-            ExitStatus::ExitSuccess => {
+            Ok(ExitStatus::ExitSuccess) => {
                 log::info!(
                     "ExitSuccess({:?})",
-                    console.captures(status).unwrap().get(0).unwrap().as_str()
+                    console
+                        .captures(ExitStatus::ExitSuccess)
+                        .unwrap()
+                        .get(0)
+                        .unwrap()
+                        .as_str()
                 );
                 Ok(None)
             }
-            ExitStatus::ExitFailure => {
+            Ok(ExitStatus::ExitFailure) => {
                 log::info!(
                     "ExitFailure({:?})",
-                    console.captures(status).unwrap().get(0).unwrap().as_str()
+                    console
+                        .captures(ExitStatus::ExitFailure)
+                        .unwrap()
+                        .get(0)
+                        .unwrap()
+                        .as_str()
                 );
                 Err(anyhow!("Matched exit_failure expression"))
             }

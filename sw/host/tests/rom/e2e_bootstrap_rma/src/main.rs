@@ -92,16 +92,15 @@ fn test_no_rma_command(opts: &Opts, transport: &TransportWrapper) -> anyhow::Res
     let exit_failure =
         Regex::new("reset_info_bitfield: 0x[0-9a-f]+\r\n").context("failed to build regex")?;
 
-    let mut console = UartConsole {
-        timeout: Some(RMA_SPIN_TIMEOUT),
-        exit_success: Some(exit_success),
-        exit_failure: Some(exit_failure),
-        ..Default::default()
-    };
+    let mut console = UartConsole::new(
+        Some(RMA_SPIN_TIMEOUT),
+        Some(exit_success),
+        Some(exit_failure),
+    );
 
     let mut stdout = io::stdout();
     let result = console
-        .interact(&*uart, None, Some(&mut stdout))
+        .interact(&*uart, Some(&mut stdout))
         .context("failed to interact with console")?;
 
     match result {
@@ -264,16 +263,15 @@ fn test_rma_command(opts: &Opts, transport: &TransportWrapper) -> anyhow::Result
         Regex::new(format!("LCV:{rma_state:x}\r\n").as_str()).context("failed to build regex")?;
     let exit_failure = Regex::new("LCV:[0-9a-f]+\r\n").context("failed to build regex")?;
 
-    let mut console = UartConsole {
-        timeout: Some(RMA_TRANSITION_CONSOLE_TIMEOUT),
-        exit_success: Some(exit_success),
-        exit_failure: Some(exit_failure),
-        ..Default::default()
-    };
+    let mut console = UartConsole::new(
+        Some(RMA_TRANSITION_CONSOLE_TIMEOUT),
+        Some(exit_success),
+        Some(exit_failure),
+    );
 
     let mut stdout = io::stdout();
     let result = console
-        .interact(&*uart, None, Some(&mut stdout))
+        .interact(&*uart, Some(&mut stdout))
         .context("failed to interact with console")?;
 
     match result {

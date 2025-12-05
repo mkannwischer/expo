@@ -7,7 +7,6 @@ use anyhow::{Result, anyhow};
 use clap::Parser;
 use regex::Regex;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 use opentitanlib::app::TransportWrapper;
@@ -62,7 +61,7 @@ struct Opts {
 
 fn flash_limit_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
     let uart = transport.uart("console")?;
-    let rescue = RescueSerial::new(Rc::clone(&uart));
+    let rescue = RescueSerial::new(uart.clone());
 
     log::info!("###### Get Boot Log (1/2) ######");
     let (data, devid) = transfer_lib::get_device_info(transport, &rescue)?;
@@ -130,7 +129,7 @@ fn flash_limit_test(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
     // verify that the firmware segement is programmed (value 0) and the
     // filesystem segment remains unprogramed (value ffffffff).
     transport.reset_target(Duration::from_millis(50), /*clear_uart=*/ true)?;
-    let capture = UartConsole::wait_for(
+    let capture = UartConsole::wait_for_bytes(
         &*uart,
         r"(?msR)flash 0x2006f800 = (\w+)$.*flash 0x20070000 = (\w+)$.*PASS!$|BFV:([0-9A-Fa-f]{8})$",
         opts.timeout,
