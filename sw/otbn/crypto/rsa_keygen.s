@@ -6,6 +6,8 @@
 /* Public interface. */
 .globl rsa_keygen
 .globl rsa_key_from_cofactor
+.globl rsa_check_key
+.globl rsa_check_primes
 
 /* Exposed for testing purposes only. */
 .globl relprime_f4
@@ -13,6 +15,7 @@
 .globl check_q
 .globl modinv_f4
 .globl relprime_small_primes
+.globl recover_d_from_crt
 
 /**
  * Generate a random RSA key pair.
@@ -123,7 +126,511 @@ rsa_keygen:
   la       x12, rsa_n
   jal      x0, bignum_mul
 
+/**
+ * Perform a check of a RSA private key.
+ *
+ * Accepts the contents of an RSA private key along with a RSA public key to
+ * compare with, and returns a series of check values which can readily be
+ * compared to fixed values to determine the validity of the RSA private key
+ * with respect to the public key.
+ *
+ * In particular, this checks whether
 
+ *  (a) the public modulus is the product of the primes in the private key,
+ *  (b) the private exponent, as determined by the private exponent CRT,
+ *      components in the private key, is the inverse of the public exponent
+ *      modulo the Carmichael function of the public modulus,
+ *  (c) the higher limbs of this reconstructed private exponent are non-zero, as
+ *      required in FIPS 186-5 section A.1.1,
+ *  (d) the CRT coefficient in the private key is the inverse of the second
+ *      modulus cofactor modulo the first.
+ *
+ * After this function executes, the processor can verify validity of the
+ * private key by checking the following values:
+ *
+ *   - The n check value (in rsa_n) will be computed as p * q and should equal
+ *     the public modulus (n).
+ *   - The d_p check value (in rsa_d_p) will be computed as e * d_p mod (p - 1)
+ *     and should equal 1.
+ *   - The d_q check value (in rsa_d_q) will be computed as e * d_q mod (q - 1)
+ *     and should equal 1.
+ *   - The i_q check value (in rsa_i_q) will be computed as q * i_q mod p and
+ *     should equal 1.
+ *   - The d check value (in rsa_e) will be equal to (1 << 256) - 1 if at least
+ *     one of the upper `plen` bits of the reconstructed private exponent (d) is
+ *     nonzero, otherwise 0. It should equal (1 << 256) - 1.
+ *
+ * Note that the second and third checks are equivalent to checking whether the
+ * private exponent d implied by (d_p, d_q) is an inverse of e mod lcm(p-1, q-1)
+ * via a simple application of the CRT.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  dmem[rsa_p..rsa_p+(plen*32)] first RSA private key prime (p)
+ * @param[in]  dmem[rsa_q..rsa_q+(plen*32)] second RSA private key prime (q)
+ * @param[in]  dmem[rsa_d_p..rsa_d_p+(plen*32)] first RSA private key
+       private exponent CRT component (d_p)
+ * @param[in]  dmem[rsa_d_q..rsa_d_q+(plen*32)] second RSA private key
+       private exponent CRT component (d_q)
+ * @param[in]  dmem[rsa_i_q..rsa_i_q+(plen*32)] RSA private key CRT
+       reconstruction coefficient (i_q)
+ * @param[in]  dmem[rsa_e..rsa_e+4] RSA public exponent (e)
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[out] dmem[rsa_n..rsa_n+(plen*2*32)] RSA public key modulus (n)
+       check value
+ * @param[out]  dmem[rsa_d_p..rsa_d_p+(plen*32)] first RSA private key private
+       exponent CRT component (d_p) check value
+ * @param[out]  dmem[rsa_d_q..rsa_d_q+(plen*32)] second RSA private key private
+       exponent CRT component (d_q) check value
+ * @param[out]  dmem[rsa_i_q..rsa_i_q+(plen*32)] RSA private key CRT
+       reconstruction coefficient (i_q) check value
+ * @param[out]  dmem[rsa_e..rsa_e+32] RSA private key private exponent (d)
+       check value
+ *
+ * clobbered registers: x2 to x8, x10 to x14, x20 to x25, w20 to w25, w27
+ * clobbered flag groups: FG0, FG1
+ */
+rsa_check_key:
+  /* Compute (<# of limbs> - 1), a helpful constant for later computations.
+       x31 <= x30 - 1 */
+  addi     x31, x30, -1
+
+  /* Initialize wide-register pointers.
+       x20 <= 20
+       x21 <= 21 */
+  li       x20, 20
+  li       x21, 21
+
+  /* Zero-extend the 32-bit provided value of e. */
+  la       x10, rsa_e
+  lw       x2, 0(x10)
+  li       x3, 31
+  bn.sid   x3, 0(x10)
+  sw       x2, 0(x10)
+
+  /* Reconstruct d from p, q, e, d_p, and d_q. */
+  jal      x1, recover_d_from_crt
+
+  /* Recompute p - 1 and q - 1 for later use in several steps. */
+  jal      x1, prepare_pm1qm1
+
+  /* Compute e * d_p mod (p - 1) to check validity of d_p. */
+  la       x13, rsa_d_p
+  la       x14, rsa_pm1
+  jal      x1, check_crt_component
+
+  /* Compute e * d_q mod (q - 1) to check validity of d_q. */
+  la       x13, rsa_d_q
+  la       x14, rsa_qm1
+  jal      x1, check_crt_component
+
+  /* Compute q * i_q mod p to check validity of i_q. */
+  jal      x1, check_crt_coeff
+
+  /* Compute the OR of the upper limbs of the reocvere d. */
+  jal      x1, check_recovered_d
+
+  /* Multiply p and q to get the public modulus n (tail call).
+       dmem[rsa_n..rsa_n+(plen*2*32)] <= p * q */
+  la       x10, rsa_p
+  la       x11, rsa_q
+  la       x12, rsa_n
+  jal      x0, bignum_mul
+
+  ret
+
+/**
+ * Perform checks on the primes in an RSA private key.
+ *
+ * This routine performs a Miller-Rabin primailty check on both provided primes
+ * and ensures that the two aren't too close, just as `rsa_keygen` does. See the
+ * documentation for `check_p` and `check_q` for details.
+ *
+ * After execution of this function, check values will be stored in each prime's
+ * place, equal to (1 << 256) - 1 if the checks for that prime pass, and 0
+ * otherwise.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  dmem[rsa_p..rsa_p+(plen*32)] first RSA private key prime (p)
+ * @param[in]  dmem[rsa_q..rsa_q+(plen*32)] second RSA private key prime (q)
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[in]  dmem[rsa_p..rsa_p+(plen*32)] first RSA private key prime (p)
+       check value
+ * @param[in]  dmem[rsa_q..rsa_q+(plen*32)] second RSA private key prime (q)
+       check value
+ *
+ * clobbered registers: x2, x3, x5 to x13, x16 to x26,
+ *                      w2, w3, w4..w[4+(plen-1)], w20 to w30
+ * clobbered flag groups: FG0, FG1
+ */
+
+rsa_check_primes:
+  /* Compute (<# of limbs> - 1), a helpful constant for later computations.
+       x31 <= x30 - 1 */
+  addi     x31, x30, -1
+
+  /* Initialize wide-register pointers.
+       x20 <= 20
+       x21 <= 21 */
+  li       x20, 20
+  li       x21, 21
+  li       x24, 24
+
+  /* Check the first cofactor p. */
+  la       x16, rsa_p
+  jal      x1, check_p
+  bn.sid   x24, 0(x16)
+
+  /* Check the second cofactor q. */
+  jal      x1, check_q
+  bn.sid   x24, 0(x16)
+
+  ret
+
+/**
+ * Perform a check of the validity of a single private key exponent CRT component.
+ *
+ * Given a public exponent e and a private exponent CRT component d_p, computes
+ * the value e * d_p mod (p - 1).
+ *
+ * If the provided value of d_p is consistent with the provided cofactor and
+ * public exponent, this computed value should be 1.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  x13: dptr_d_p, pointer to buffer to store result in DMEM
+ * @param[in]  x14: dptr_pm1, pointer to (p - 1) to reduce modulo in DMEM
+ * @param[in]  x20: 20, constant
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[out] dmem[dptr_d_p..dptr_d_p+(plen*32)]: result, equal to 1 when valid
+ *
+ * clobbered registers: x2 to x5, x8, x10 to x12, x21 to x23, w20 to w25, w27
+ * clobbered flag groups: FG0
+ */
+check_crt_component:
+  /* Multiply e * d_p, storing result in tmp_scratchpad. */
+  addi     x10, x13, 0
+  la       x11, rsa_e
+  la       x12, tmp_scratchpad
+  jal      x1, bignum_mul256
+
+  /* Copy p - 1, using rsa_n as a temporary buffer. */
+  addi     x10, x14, 0
+  la       x11, rsa_n
+  loop     x30, 2
+    bn.lid   x20, 0(x10++)
+    bn.sid   x20, 0(x11++)
+
+  /* Zero out one additional word to zero-extend. */
+  li       x2, 31
+  bn.sid   x2, 0(x11)
+
+  /* Add one to the limb count. */
+  addi     x30, x30, 1
+
+  /* Perform a modular reduction. */
+  la       x10, tmp_scratchpad
+  la       x11, rsa_n
+  jal      x1, mod
+
+  /* Subtract one back from the limb count. */
+  addi     x30, x30, -1
+
+  /* Copy result to d_p. */
+  la       x10, tmp_scratchpad
+  addi     x11, x13, 0
+  loop     x30, 2
+    bn.lid   x20, 0(x10++)
+    bn.sid   x20, 0(x11++)
+
+  ret
+
+/**
+ * Perform a check of the validity of a CRT coefficient.
+ *
+ * Computes i_q * q modulo p, storing the result over i_q. This value will be 1
+ * exactly when the provided i_q is valid.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  dmem[rsa_i_q..rsa_i_q+(plen*32)] CRT coefficient (i_q)
+ * @param[in]  dmem[rsa_p..rsa_p+(plen*32)] first RSA prime (p)
+ * @param[in]  dmem[rsa_q..rsa_q+(plen*32)] second RSA prime (q)
+ * @param[in]  dmem[rsa_d_p..rsa_d_p+(plen*32)] first RSA private key
+       private exponent CRT component (d_p)
+ * @param[in]  dmem[rsa_d_q..rsa_d_q+(plen*32)] second RSA private key
+       private exponent CRT component (d_q)
+ * @param[in]  x20: 20, constant
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[out] dmem[rsa_i_q..rsa_i_q+(plen*32)]: result, equal to 1 when valid
+ *
+ * clobbered registers: x2 to x8, x10 to x12, x21 to x23, w20 to w25, w27
+ * clobbered flag groups: FG0
+ */
+check_crt_coeff:
+  /* Multiply q * i_q, storing result in tmp_scratchpad. */
+  la       x10, rsa_q
+  la       x11, rsa_i_q
+  la       x12, tmp_scratchpad
+  jal      x1, bignum_mul
+
+  /* Copy p to the start of rsa_n to zero-extend it. */
+  la       x10, rsa_p
+  la       x11, rsa_n
+  loop     x30, 2
+    bn.lid   x20, 0(x10++)
+    bn.sid   x20, 0(x11++)
+
+  /* Zero out the remainder of the scratchpad to perform the zero-extend. */
+  li       x2, 31
+  loop     x30, 1
+    bn.sid   x2, 0(x11++)
+
+  /* Double limb count. */
+  add      x30, x30, x30
+
+  /* Perform a modular reduction. */
+  la       x10, tmp_scratchpad
+  la       x11, rsa_n
+  jal      x1, mod
+
+  /* Halve limb count. */
+  srli     x30, x30, 1
+
+  /* Copy result to i_q. */
+  la       x10, tmp_scratchpad
+  la       x11, rsa_i_q
+  loop     x30, 2
+    bn.lid   x20, 0(x10++)
+    bn.sid   x20, 0(x11++)
+
+  ret
+
+/**
+ * Recover a full private exponent from its CRT components.
+ *
+ * Computes d_p + d_q - e * d_p * d_q mod lcm(p - 1, q - 1). This expression
+ * can be verified to be equal to d_p and d_q modulo p - 1 and q - 1
+ * respectively, implying it recovers d mod lcm(p - 1, q - 1) by CRT.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  dmem[rsa_p..rsa_p+(plen*32)] first RSA prime (p)
+ * @param[in]  dmem[rsa_q..rsa_q+(plen*32)] second RSA prime (q)
+ * @param[in]  dmem[rsa_d_p..rsa_d_p+(plen*32)] first RSA private key private
+       exponent CRT component (d_p)
+ * @param[in]  dmem[rsa_d_q..rsa_d_q+(plen*32)] second RSA private key private
+       exponent CRT component (d_q)
+ * @param[in]  dmem[rsa_e..rsa_e+32] RSA public exponent (e)
+ * @param[in]  x20: 20, constant
+ * @param[in]  x21: 21, constant
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[out] dmem[rsa_d..rsa_d+(plen*2*32)] RSA private exponent (d)
+ *
+ * clobbered registers: x2 to x8, x10 to x12, x22 to x25, w20 to w25, w27
+ * clobbered flag groups: FG0, FG1
+ */
+recover_d_from_crt:
+  /* Multiply d_p * d_q, storing result in rsa_n */
+  la       x10, rsa_d_p
+  la       x11, rsa_d_q
+  la       x12, rsa_n
+  jal      x1, bignum_mul
+
+  /* Double the limb count for the next copy.  */
+  add      x30, x30, x30
+
+  /* Multiply e * d_p * d_q, storing result in rsa_d */
+  la       x10, rsa_n
+  la       x11, rsa_e
+  la       x12, rsa_d
+  jal      x1, bignum_mul256
+
+  /* Halve the limb count.  */
+  srli     x30, x30, 1
+
+  /* Compute p - 1 and q - 1 for LCM computation. */
+  jal      x1, prepare_pm1qm1
+
+  /* Compute the LCM of (p-1) and (q-1) and store it in rsa_d.
+       dmem[rsa_n] <= LCM(p-1,q-1) */
+  la       x10, rsa_pm1
+  la       x11, rsa_qm1
+  la       x12, rsa_n
+  jal      x1, lcm
+
+  /* Double the limb count for the next copy.  */
+  add      x30, x30, x30
+
+  /* Copy the result to rsa_cofactor. */
+  la       x10, rsa_n
+  la       x11, rsa_cofactor
+  loop     x30, 2
+    bn.lid   x20, 0(x10++)
+    bn.sid   x20, 0(x11++)
+
+  /* Copy rsa_e into a register, as the following zero-extension of the LCM may
+     overwrite it for larger key sizes. */
+  li       x2, 28
+  la       x3, rsa_e
+  bn.lid   x2, 0(x3)
+
+  /* Zero extend the LCM for an upcoming modular reduction. */
+  li       x2, 31
+  bn.sid   x2, 0(x11)
+
+  /* Increment the limb count. */
+  addi     x30, x30, 1
+
+  /* Reduce e * d_p * d_q mod lcm(p - 1, q - 1) */
+  la       x10, rsa_d
+  la       x11, rsa_cofactor
+  jal      x1, mod
+
+  /* Decrement the limb count. */
+  addi     x30, x30, -1
+
+  /* Clear flags. */
+  bn.add   w31, w31, w31
+
+  /* Negate e * d_p * d_q mod lcm(p - 1, q - 1). */
+  la       x10, rsa_cofactor
+  la       x11, rsa_d
+  loop     x30, 4
+    bn.lid   x20, 0(x10++)
+    bn.lid   x21, 0(x11)
+    bn.subb  w20, w20, w21
+    bn.sid   x20, 0(x11++)
+
+  /* Clear flags. */
+  bn.sub   w31, w31, w31
+
+  /* Halve the limb counts. */
+  srli     x30, x30, 1
+
+  /* Add rsa_d_p and rsa_d_q, storing the result in rsa_n in preparation. */
+  la       x10, rsa_d_p
+  la       x11, rsa_d_q
+  la       x12, rsa_n
+  loop     x30, 4
+    bn.lid   x20, 0(x10++)
+    bn.lid   x21, 0(x11++)
+    bn.addc  w20, w20, w21
+    bn.sid   x20, 0(x12++)
+
+  /* Write the carry out, and zero the rest of rsa_n. */
+  bn.addc  w20, w31, w31
+  bn.sid   x20, 0(x12++)
+  li       x2, 31
+  loop     x31, 1
+    bn.sid   x2, 0(x12++)
+
+  /* Clear both flag groups. */
+  bn.add   w31, w31, w31
+  bn.add   w31, w31, w31, FG1
+
+  /* Double the limb count. */
+  add      x30, x30, x30
+
+  /* Compare e * d_p * d_q (stored in rsa_d) plus d_p + d_q (stored in rsa_n)
+     to lcm(p - 1, q - 1). */
+  la       x10, rsa_d
+  la       x11, rsa_n
+  la       x12, rsa_cofactor
+  loop     x30, 5
+    bn.lid   x20, 0(x10++)
+    bn.lid   x21, 0(x11++)
+    bn.addc  w22, w20, w21
+    bn.lid   x21, 0(x12++)
+    bn.cmpb  w22, w21, FG1
+
+  /* Capture ~FG0.C & FG1.C as a mask that is all 1s if we should subtract
+     the modulus.
+       w26 <= (~FG0.C & FG1.C) ? 0 : 2^256 - 1 */
+  bn.subb  w23, w31, w31, FG0
+  bn.subb  w26, w31, w31, FG1
+  bn.not   w26, w26
+  bn.or    w26, w23, w26
+
+  /* Clear flags for both groups. */
+  bn.sub   w31, w31, w31, FG0
+  bn.sub   w31, w31, w31, FG1
+
+  /* Update rsa_d to store the actual recovered value of d. */
+  la       x10, rsa_d
+  la       x11, rsa_n
+  la       x12, rsa_cofactor
+  loop     x30, 7
+    bn.lid   x20, 0(x10)
+    bn.lid   x21, 0(x11++)
+    bn.addc  w20, w20, w21
+    bn.lid   x21, 0(x12++)
+    bn.and   w21, w21, w26
+    bn.subb  w20, w20, w21, FG1
+    bn.sid   x20, 0(x10++)
+
+  /* Reset the limb count. */
+  srli     x30, x30, 1
+
+  /* Restore e. */
+  li       x2, 28
+  la       x3, rsa_e
+  bn.sid   x2, 0(x3)
+
+  ret
+
+/**
+ * Check the recovered value of a recovered RSA private exponent.
+ *
+ * Checks that at least one of the upper `plen` bits of a recovered RSA private
+ * exponent (d) is non-zero. Stores (1 << 256) - 1 in dmem[rsa_e..rsa_e+32] if
+ * this check passes, otherwise 0.
+ *
+ * Flags: Flags have no meaning beyond the scope of this subroutine.
+ *
+ * @param[in]  dmem[rsa_d..rsa_d+(plen*2*32)] RSA private exponent (d)
+ * @param[in]  x20: 20, constant
+ * @param[in]  x21: 21, constant
+ * @param[in]  x30: plen, number of 256-bit limbs for p and q
+ * @param[in]  w31: all-zero
+ * @param[out] dmem[rsa_e..rsa_e+32] RSA private exponent (d) check value
+ *
+ * clobbered registers: x2, x10, w20 to w23
+ * clobbered flag groups: FG0
+ */
+check_recovered_d:
+  /* Get a pointer to the second half of d.
+       x3 <= rsa_d + plen*32 */
+  slli     x2, x30, 5
+  la       x10, rsa_d
+  add      x10, x10, x2
+
+  /* Create a pair of possible return values */
+  bn.mov    w22, w31
+  bn.not    w23, w22
+
+  /* Logical OR all upper limbs of d together. */
+  bn.mov   w21, w31
+  loop     x30, 2
+    /* w20 <= d[n+i] */
+    bn.lid  x20, 0(x10++)
+    /* w21 <= w21 | w20 */
+    bn.or   w21, w21, w20
+
+  /* Select either all 0s or all 1s based on FG0.Z */
+  bn.sel   w21, w22, w23, FG0.Z
+
+  /* Store the result in rsa_e. */
+  la       x10, rsa_e
+  bn.sid   x21, 0(x10)
+
+  ret
 
 /**
  * Subtract one from both RSA cofactors p and q, in preparation for computation
@@ -1859,7 +2366,7 @@ is_zero_mod_small_prime:
 .section .scratchpad
 
 /* RSA private exponent d. Up to 4096 bits; also used as a temporary work buffer
-  containing `mont_m0inv` and `mont_rr`. */
+   containing `mont_m0inv` and `mont_rr`. */
 .balign 32
 rsa_d:
 
@@ -1926,7 +2433,7 @@ rsa_i_q:
 .zero 256
 
 /* Prime cofactor for n for `rsa_key_from_cofactor`; also used as a temporary
- * work buffer containing `rsa_pm1` and `rsa_pm2`. */
+   work buffer containing `rsa_pm1` and `rsa_pm2`. */
 .balign 32
 .globl rsa_cofactor
 rsa_cofactor:
@@ -1946,3 +2453,12 @@ rsa_pm1:
 .globl rsa_qm1
 rsa_qm1:
 .zero 256
+
+/* RSA public exponent e. Used only for checking validity of private keys, as
+   all key generation routines require e = 65537. Note that this overlaps with
+   rsa_cofactor, as no mode reqiures the processor to provide a public exponent
+   and lone cofactor. */
+.balign 32
+.globl rsa_e
+rsa_e:
+.zero 32
