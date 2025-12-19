@@ -16,6 +16,284 @@
 // Module ID for status codes.
 #define MODULE_ID MAKE_MODULE_ID('p', '3', '8')
 
+/**
+ * Check if a key mode is intended for ECC P-384 use.
+ *
+ * @param mode Mode to check.
+ * @return OK if the mode is for ECC P-384 use, OTCRYPTO_BAD_ARGS otherwise.
+ */
+static status_t p384_mode_check(const otcrypto_key_mode_t mode) {
+  switch (launder32(mode)) {
+    case kOtcryptoKeyModeEcdsaP384:
+      HARDENED_CHECK_EQ(mode, kOtcryptoKeyModeEcdsaP384);
+      return OTCRYPTO_OK;
+    case kOtcryptoKeyModeEcdhP384:
+      HARDENED_CHECK_EQ(mode, kOtcryptoKeyModeEcdhP384);
+      return OTCRYPTO_OK;
+    default:
+      return OTCRYPTO_BAD_ARGS;
+  }
+
+  // Should be unreachable.
+  HARDENED_TRAP();
+  return OTCRYPTO_FATAL_ERR;
+}
+
+/**
+ * Check the lengths of public keys for curve P-384.
+ *
+ * Checks the length of caller-allocated buffers for a P-384 public key. This
+ * function may be used for both ECDSA and ECDH keys, since the key structure
+ * is the same.
+ *
+ * If this check passes, it is safe to interpret public_key->key as a
+ * `p384_point_t *`.
+ *
+ * @param public_key Public key struct to check.
+ * @return OK if the lengths are correct or BAD_ARGS otherwise.
+ */
+OT_WARN_UNUSED_RESULT
+static status_t p384_public_key_length_check(
+    const otcrypto_unblinded_key_t *public_key) {
+  if (launder32(public_key->key_length) != sizeof(p384_point_t)) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(public_key->key_length, sizeof(p384_point_t));
+  return OTCRYPTO_OK;
+}
+
+/**
+ * Check the lengths of private keys for curve P-384.
+ *
+ * Checks the length of caller-allocated buffers for a P-384 private key. This
+ * function may be used for both ECDSA and ECDH keys, since the key structure
+ * is the same.
+ *
+ * If this check passes and `hw_backed` is false, it is safe to interpret
+ * `private_key->keyblob` as a `p384_masked_scalar_t *`.
+ *
+ * @param private_key Private key struct to check.
+ * @return OK if the lengths are correct or BAD_ARGS otherwise.
+ */
+OT_WARN_UNUSED_RESULT
+static status_t p384_private_key_length_check(
+    const otcrypto_blinded_key_t *private_key) {
+  if (private_key->keyblob == NULL) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+
+  if (launder32(private_key->config.hw_backed) == kHardenedBoolTrue) {
+    // Skip the length check in this case; if the salt is the wrong length, the
+    // keyblob library will catch it before we sideload the key.
+    return OTCRYPTO_OK;
+  }
+  HARDENED_CHECK_NE(private_key->config.hw_backed, kHardenedBoolTrue);
+
+  // Check the unmasked length.
+  if (launder32(private_key->config.key_length) != kP384ScalarBytes) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(private_key->config.key_length, kP384ScalarBytes);
+
+  // Check the single-share length.
+  if (launder32(keyblob_share_num_words(private_key->config)) !=
+      kP384MaskedScalarShareWords) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(keyblob_share_num_words(private_key->config),
+                    kP384MaskedScalarShareWords);
+
+  // Check the keyblob length.
+  if (launder32(private_key->keyblob_length) != sizeof(p384_masked_scalar_t)) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(private_key->keyblob_length, sizeof(p384_masked_scalar_t));
+
+  return OTCRYPTO_OK;
+}
+
+otcrypto_status_t otcrypto_p384_public_key_construct(
+    otcrypto_const_word32_buf_t x, otcrypto_const_word32_buf_t y,
+    otcrypto_unblinded_key_t *public_key) {
+  // Entropy complex must be initialized for `hardened_memcpy`.
+  HARDENED_TRY(entropy_complex_check());
+
+  // Check for any NULL pointers.
+  if (public_key == NULL || public_key->key == NULL || x.data == NULL ||
+      y.data == NULL) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+
+  // Check the key mode.
+  HARDENED_TRY(p384_mode_check(public_key->key_mode));
+
+  // Check the key and coordinate lengths.
+  HARDENED_TRY(p384_public_key_length_check(public_key));
+  if (x.len != kP384CoordWords || y.len != kP384CoordWords) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(x.len, kP384CoordWords);
+  HARDENED_CHECK_EQ(y.len, kP384CoordWords);
+
+  // Copy the provided values into the public key.
+  p384_point_t *pk = (p384_point_t *)public_key->key;
+  hardened_memcpy(pk->x, x.data, kP384CoordWords);
+  hardened_memcpy(pk->y, y.data, kP384CoordWords);
+
+  // Set the public key checksum.
+  public_key->checksum = integrity_unblinded_checksum(public_key);
+
+  return OTCRYPTO_OK;
+}
+
+otcrypto_status_t otcrypto_p384_public_key_construct_and_check(
+    otcrypto_const_word32_buf_t x, otcrypto_const_word32_buf_t y,
+    otcrypto_unblinded_key_t *public_key, hardened_bool_t *key_valid) {
+  HARDENED_TRY(otcrypto_p384_public_key_construct_and_check_async_start(
+      x, y, public_key, key_valid));
+  OTBN_WIPE_IF_ERROR(otbn_busy_wait_for_done());
+  return otcrypto_p384_public_key_construct_and_check_async_finalize(key_valid);
+}
+
+otcrypto_status_t otcrypto_p384_public_key_construct_and_check_async_start(
+    otcrypto_const_word32_buf_t x, otcrypto_const_word32_buf_t y,
+    otcrypto_unblinded_key_t *public_key, hardened_bool_t *key_valid) {
+  // Defensively mark the private key as invalid to start.
+  *key_valid = kHardenedBoolFalse;
+
+  // Construct a copy of the private key from the provided parameters.
+  HARDENED_TRY(otcrypto_p384_public_key_construct(x, y, public_key));
+
+  // Start the public key check.
+  p384_point_t *pk = (p384_point_t *)public_key->key;
+  return p384_public_key_check_start(pk);
+}
+
+otcrypto_status_t otcrypto_p384_public_key_construct_and_check_async_finalize(
+    hardened_bool_t *key_valid) {
+  // Finalize the public key check.
+  return p384_public_key_check_finalize(key_valid);
+}
+
+otcrypto_status_t otcrypto_p384_public_key_deconstruct(
+    const otcrypto_unblinded_key_t *public_key, otcrypto_word32_buf_t x,
+    otcrypto_word32_buf_t y) {
+  // Entropy complex must be initialized for `hardened_memcpy`.
+  HARDENED_TRY(entropy_complex_check());
+
+  // Check for any NULL pointers.
+  if (public_key == NULL || public_key->key == NULL || x.data == NULL ||
+      y.data == NULL) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+
+  // Check the key mode.
+  HARDENED_TRY(p384_mode_check(public_key->key_mode));
+
+  // Check the key and coordinate lengths.
+  HARDENED_TRY(p384_public_key_length_check(public_key));
+  if (x.len != kP384CoordWords || y.len != kP384CoordWords) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(x.len, kP384CoordWords);
+  HARDENED_CHECK_EQ(y.len, kP384CoordWords);
+
+  // Check the integrity of the public key.
+  if (launder32(integrity_unblinded_key_check(public_key)) !=
+      kHardenedBoolTrue) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(integrity_unblinded_key_check(public_key),
+                    kHardenedBoolTrue);
+
+  // Copy the provided values into the public key.
+  p384_point_t *pk = (p384_point_t *)public_key->key;
+  hardened_memcpy(x.data, pk->x, kP384CoordWords);
+  hardened_memcpy(y.data, pk->y, kP384CoordWords);
+  return OTCRYPTO_OK;
+}
+
+otcrypto_status_t otcrypto_p384_private_key_construct(
+    otcrypto_const_word32_buf_t scalar_share0,
+    otcrypto_const_word32_buf_t scalar_share1,
+    otcrypto_blinded_key_t *private_key) {
+  // Entropy complex must be initialized for `hardened_memcpy`.
+  HARDENED_TRY(entropy_complex_check());
+
+  // Check for any NULL pointers.
+  if (private_key == NULL || private_key->keyblob == NULL ||
+      scalar_share0.data == NULL || scalar_share1.data == NULL) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+
+  // Check the key mode.
+  HARDENED_TRY(p384_mode_check(private_key->config.key_mode));
+
+  // Check the key and scalar share lengths.
+  HARDENED_TRY(p384_private_key_length_check(private_key));
+  if (scalar_share0.len != kP384MaskedScalarShareWords ||
+      scalar_share1.len != kP384MaskedScalarShareWords) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(scalar_share0.len, kP384MaskedScalarShareWords);
+  HARDENED_CHECK_EQ(scalar_share1.len, kP384MaskedScalarShareWords);
+
+  // Copy the provided values into the private key.
+  p384_masked_scalar_t *sk = (p384_masked_scalar_t *)private_key->keyblob;
+  hardened_memcpy(sk->share0, scalar_share0.data, kP384MaskedScalarShareWords);
+  hardened_memcpy(sk->share1, scalar_share1.data, kP384MaskedScalarShareWords);
+
+  // Set the private key checksum.
+  private_key->checksum = integrity_blinded_checksum(private_key);
+
+  return OTCRYPTO_OK;
+}
+
+otcrypto_status_t otcrypto_p384_private_key_deconstruct(
+    const otcrypto_blinded_key_t *private_key,
+    otcrypto_word32_buf_t scalar_share0, otcrypto_word32_buf_t scalar_share1) {
+  // Entropy complex must be initialized for `hardened_memcpy`.
+  HARDENED_TRY(entropy_complex_check());
+
+  // Check for any NULL pointers.
+  if (private_key == NULL || private_key->keyblob == NULL ||
+      scalar_share0.data == NULL || scalar_share1.data == NULL) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+
+  // Check the key mode.
+  HARDENED_TRY(p384_mode_check(private_key->config.key_mode));
+
+  // Check that the key is exportable.
+  if (private_key->config.exportable != kHardenedBoolTrue) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(private_key->config.exportable, kHardenedBoolTrue);
+
+  // Check the key and scalar share lengths.
+  HARDENED_TRY(p384_private_key_length_check(private_key));
+  if (scalar_share0.len != kP384MaskedScalarShareWords ||
+      scalar_share1.len != kP384MaskedScalarShareWords) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(scalar_share0.len, kP384MaskedScalarShareWords);
+  HARDENED_CHECK_EQ(scalar_share1.len, kP384MaskedScalarShareWords);
+
+  // Check the integrity of the private key.
+  if (launder32(integrity_blinded_key_check(private_key)) !=
+      kHardenedBoolTrue) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_EQ(integrity_blinded_key_check(private_key),
+                    kHardenedBoolTrue);
+
+  // Copy the provided values into the private key.
+  p384_masked_scalar_t *sk = (p384_masked_scalar_t *)private_key->keyblob;
+  hardened_memcpy(scalar_share0.data, sk->share0, kP384MaskedScalarShareWords);
+  hardened_memcpy(scalar_share1.data, sk->share1, kP384MaskedScalarShareWords);
+  return OTCRYPTO_OK;
+}
+
 otcrypto_status_t otcrypto_ecdsa_p384_keygen(
     otcrypto_blinded_key_t *private_key, otcrypto_unblinded_key_t *public_key) {
   HARDENED_TRY(otcrypto_ecdsa_p384_keygen_async_start(private_key));
@@ -126,78 +404,6 @@ otcrypto_status_t otcrypto_ecdsa_p384_keygen_async_start(
   return internal_p384_keygen_start(private_key);
 }
 
-/**
- * Check the lengths of private keys for curve P-384.
- *
- * Checks the length of caller-allocated buffers for a P-384 private key. This
- * function may be used for both ECDSA and ECDH keys, since the key structure
- * is the same.
- *
- * If this check passes and `hw_backed` is false, it is safe to interpret
- * `private_key->keyblob` as a `p384_masked_scalar_t *`.
- *
- * @param private_key Private key struct to check.
- * @return OK if the lengths are correct or BAD_ARGS otherwise.
- */
-OT_WARN_UNUSED_RESULT
-static status_t p384_private_key_length_check(
-    const otcrypto_blinded_key_t *private_key) {
-  if (private_key->keyblob == NULL) {
-    return OTCRYPTO_BAD_ARGS;
-  }
-
-  if (launder32(private_key->config.hw_backed) == kHardenedBoolTrue) {
-    // Skip the length check in this case; if the salt is the wrong length, the
-    // keyblob library will catch it before we sideload the key.
-    return OTCRYPTO_OK;
-  }
-  HARDENED_CHECK_NE(private_key->config.hw_backed, kHardenedBoolTrue);
-
-  // Check the unmasked length.
-  if (launder32(private_key->config.key_length) != kP384ScalarBytes) {
-    return OTCRYPTO_BAD_ARGS;
-  }
-  HARDENED_CHECK_EQ(private_key->config.key_length, kP384ScalarBytes);
-
-  // Check the single-share length.
-  if (launder32(keyblob_share_num_words(private_key->config)) !=
-      kP384MaskedScalarShareWords) {
-    return OTCRYPTO_BAD_ARGS;
-  }
-  HARDENED_CHECK_EQ(keyblob_share_num_words(private_key->config),
-                    kP384MaskedScalarShareWords);
-
-  // Check the keyblob length.
-  if (launder32(private_key->keyblob_length) != sizeof(p384_masked_scalar_t)) {
-    return OTCRYPTO_BAD_ARGS;
-  }
-  HARDENED_CHECK_EQ(private_key->keyblob_length, sizeof(p384_masked_scalar_t));
-
-  return OTCRYPTO_OK;
-}
-
-/**
- * Check the lengths of public keys for curve P-384.
- *
- * Checks the length of caller-allocated buffers for a P-384 public key. This
- * function may be used for both ECDSA and ECDH keys, since the key structure
- * is the same.
- *
- * If this check passes, it is safe to interpret public_key->key as a
- * `p384_point_t *`.
- *
- * @param public_key Public key struct to check.
- * @return OK if the lengths are correct or BAD_ARGS otherwise.
- */
-OT_WARN_UNUSED_RESULT
-static status_t p384_public_key_length_check(
-    const otcrypto_unblinded_key_t *public_key) {
-  if (launder32(public_key->key_length) != sizeof(p384_point_t)) {
-    return OTCRYPTO_BAD_ARGS;
-  }
-  HARDENED_CHECK_EQ(public_key->key_length, sizeof(p384_point_t));
-  return OTCRYPTO_OK;
-}
 /**
  * Finalize a keypair generation operation for curve P-384.
  *
