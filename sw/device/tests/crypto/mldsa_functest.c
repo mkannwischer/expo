@@ -83,6 +83,14 @@ static const uint8_t kSignRnd[32] = {
       kOtcryptoMldsa87WorkBufferVerifyWords)
 static uint32_t mldsa_work_buffer[MLDSA_MAX_WORK_BUFFER_WORDS];
 
+// Static buffers for all ML-DSA test operations (sized for ML-DSA-87)
+static uint32_t mldsa_public_key_data[(kOtcryptoMldsa87PublicKeyBytes + 3) / 4];
+static uint32_t
+    mldsa_secret_key_data[2 * ((kOtcryptoMldsa87SecretKeyBytes + 3) / 4)];
+static uint32_t mldsa_signature[(kOtcryptoMldsa87SignatureBytes + 3) / 4];
+static uint32_t mldsa_test_msg_buf[(TEST_MSG_87_LEN + 3) / 4];
+static uint32_t mldsa_test_ctx_buf[(TEST_CTX_LEN + 3) / 4];
+
 static const uint8_t kMldsa44ExpectedSignature[kOtcryptoMldsa44SignatureBytes] =
     {0x9f, 0x92, 0x20, 0xed, 0x4d, 0xe6, 0x72, 0x05, 0xf7, 0x7f, 0x54, 0x69,
      0xb5, 0x15, 0x09, 0x59, 0xdf, 0x69, 0x5c, 0x71, 0xf2, 0x8c, 0xe5, 0xf7,
@@ -955,19 +963,11 @@ static const uint8_t kMldsa87ExpectedSignature[kOtcryptoMldsa87SignatureBytes] =
 static void test_mldsa44_derand(void) {
   uint64_t t0;
 
-  uint32_t public_key_data[ceil_div(kOtcryptoMldsa44PublicKeyBytes,
-                                    sizeof(uint32_t))];
-  uint32_t secret_key_data[ceil_div(kOtcryptoMldsa44SecretKeyBytes,
-                                    sizeof(uint32_t)) *
-                           2];
-  uint32_t
-      signature[ceil_div(kOtcryptoMldsa44SignatureBytes, sizeof(uint32_t))];
-
   // Set up public key struct
   otcrypto_unblinded_key_t public_key = {
       .key_mode = kOtcryptoKeyModeMldsa44,
       .key_length = kOtcryptoMldsa44PublicKeyBytes,
-      .key = public_key_data,
+      .key = mldsa_public_key_data,
       .checksum = 0,
   };
 
@@ -982,8 +982,10 @@ static void test_mldsa44_derand(void) {
   };
   otcrypto_blinded_key_t secret_key = {
       .config = secret_key_config,
-      .keyblob_length = sizeof(secret_key_data),
-      .keyblob = secret_key_data,
+      .keyblob_length =
+          2 * ceil_div(kOtcryptoMldsa44SecretKeyBytes, sizeof(uint32_t)) *
+          sizeof(uint32_t),
+      .keyblob = mldsa_secret_key_data,
       .checksum = 0,
   };
 
@@ -997,23 +999,22 @@ static void test_mldsa44_derand(void) {
   profile_end_and_print(t0, "otcrypto_mldsa44_keypair_derand");
 
   LOG_INFO("Signing...");
-  uint32_t test_msg_buf[ceil_div(TEST_MSG_44_LEN, sizeof(uint32_t))];
-  uint32_t test_ctx_buf[ceil_div(TEST_CTX_LEN, sizeof(uint32_t))];
-  memcpy(test_msg_buf, TEST_MSG_44, TEST_MSG_44_LEN);
-  memcpy(test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
+  memcpy(mldsa_test_msg_buf, TEST_MSG_44, TEST_MSG_44_LEN);
+  memcpy(mldsa_test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
 
-  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)test_ctx_buf,
+  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)mldsa_test_ctx_buf,
                                    .len = TEST_CTX_LEN};
   otcrypto_const_byte_buf_t rnd = {.data = kSignRnd, .len = sizeof(kSignRnd)};
-  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)signature,
-                                 .len = sizeof(signature)};
+  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)mldsa_signature,
+                                 .len = sizeof(mldsa_signature)};
 
 #ifdef MLDSA_BENCHMARK_MODE
   // Benchmark 2-iteration message first
   uint64_t time_2iter;
-  memcpy(test_msg_buf, TEST_MSG_44_2ITER, TEST_MSG_44_2ITER_LEN);
-  otcrypto_const_byte_buf_t msg_2iter = {.data = (const uint8_t *)test_msg_buf,
-                                         .len = TEST_MSG_44_2ITER_LEN};
+  memcpy(mldsa_test_msg_buf, TEST_MSG_44_2ITER, TEST_MSG_44_2ITER_LEN);
+  otcrypto_const_byte_buf_t msg_2iter = {
+      .data = (const uint8_t *)mldsa_test_msg_buf,
+      .len = TEST_MSG_44_2ITER_LEN};
   time_2iter = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa44_sign_derand(&secret_key, msg_2iter, ctx,
                                                kOtcryptoMldsaSignModeMldsa, rnd,
@@ -1023,8 +1024,8 @@ static void test_mldsa44_derand(void) {
 #endif
 
   // Sign 1-iteration message
-  memcpy(test_msg_buf, TEST_MSG_44, TEST_MSG_44_LEN);
-  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)test_msg_buf,
+  memcpy(mldsa_test_msg_buf, TEST_MSG_44, TEST_MSG_44_LEN);
+  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)mldsa_test_msg_buf,
                                    .len = TEST_MSG_44_LEN};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa44_sign_derand(&secret_key, msg, ctx,
@@ -1032,7 +1033,7 @@ static void test_mldsa44_derand(void) {
                                                sig_buf, mldsa_work_buffer));
   uint64_t time_1iter = profile_end(t0);
 
-  CHECK_ARRAYS_EQ((uint8_t *)signature, kMldsa44ExpectedSignature,
+  CHECK_ARRAYS_EQ((uint8_t *)mldsa_signature, kMldsa44ExpectedSignature,
                   kOtcryptoMldsa44SignatureBytes);
 
   LOG_INFO("1-iteration message signing time: %u cycles", (uint32_t)time_1iter);
@@ -1048,7 +1049,7 @@ static void test_mldsa44_derand(void) {
 
   LOG_INFO("Verifying...");
   hardened_bool_t verification_result;
-  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)signature,
+  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)mldsa_signature,
                                          .len = kOtcryptoMldsa44SignatureBytes};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa44_verify(
@@ -1062,19 +1063,11 @@ static void test_mldsa44_derand(void) {
 static void test_mldsa65_derand(void) {
   uint64_t t0;
 
-  uint32_t public_key_data[ceil_div(kOtcryptoMldsa65PublicKeyBytes,
-                                    sizeof(uint32_t))];
-  uint32_t secret_key_data[ceil_div(kOtcryptoMldsa65SecretKeyBytes,
-                                    sizeof(uint32_t)) *
-                           2];
-  uint32_t
-      signature[ceil_div(kOtcryptoMldsa65SignatureBytes, sizeof(uint32_t))];
-
   // Set up public key struct
   otcrypto_unblinded_key_t public_key = {
       .key_mode = kOtcryptoKeyModeMldsa65,
       .key_length = kOtcryptoMldsa65PublicKeyBytes,
-      .key = public_key_data,
+      .key = mldsa_public_key_data,
       .checksum = 0,
   };
 
@@ -1089,8 +1082,10 @@ static void test_mldsa65_derand(void) {
   };
   otcrypto_blinded_key_t secret_key = {
       .config = secret_key_config,
-      .keyblob_length = sizeof(secret_key_data),
-      .keyblob = secret_key_data,
+      .keyblob_length =
+          2 * ceil_div(kOtcryptoMldsa65SecretKeyBytes, sizeof(uint32_t)) *
+          sizeof(uint32_t),
+      .keyblob = mldsa_secret_key_data,
       .checksum = 0,
   };
 
@@ -1104,23 +1099,22 @@ static void test_mldsa65_derand(void) {
   profile_end_and_print(t0, "otcrypto_mldsa65_keypair_derand");
 
   LOG_INFO("Signing...");
-  uint32_t test_msg_buf[ceil_div(TEST_MSG_65_LEN, sizeof(uint32_t))];
-  uint32_t test_ctx_buf[ceil_div(TEST_CTX_LEN, sizeof(uint32_t))];
-  memcpy(test_msg_buf, TEST_MSG_65, TEST_MSG_65_LEN);
-  memcpy(test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
+  memcpy(mldsa_test_msg_buf, TEST_MSG_65, TEST_MSG_65_LEN);
+  memcpy(mldsa_test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
 
-  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)test_ctx_buf,
+  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)mldsa_test_ctx_buf,
                                    .len = TEST_CTX_LEN};
   otcrypto_const_byte_buf_t rnd = {.data = kSignRnd, .len = sizeof(kSignRnd)};
-  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)signature,
-                                 .len = sizeof(signature)};
+  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)mldsa_signature,
+                                 .len = sizeof(mldsa_signature)};
 
 #ifdef MLDSA_BENCHMARK_MODE
   // Benchmark 2-iteration message first
   uint64_t time_2iter;
-  memcpy(test_msg_buf, TEST_MSG_65_2ITER, TEST_MSG_65_2ITER_LEN);
-  otcrypto_const_byte_buf_t msg_2iter = {.data = (const uint8_t *)test_msg_buf,
-                                         .len = TEST_MSG_65_2ITER_LEN};
+  memcpy(mldsa_test_msg_buf, TEST_MSG_65_2ITER, TEST_MSG_65_2ITER_LEN);
+  otcrypto_const_byte_buf_t msg_2iter = {
+      .data = (const uint8_t *)mldsa_test_msg_buf,
+      .len = TEST_MSG_65_2ITER_LEN};
   time_2iter = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa65_sign_derand(&secret_key, msg_2iter, ctx,
                                                kOtcryptoMldsaSignModeMldsa, rnd,
@@ -1130,8 +1124,8 @@ static void test_mldsa65_derand(void) {
 #endif
 
   // Sign 1-iteration message
-  memcpy(test_msg_buf, TEST_MSG_65, TEST_MSG_65_LEN);
-  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)test_msg_buf,
+  memcpy(mldsa_test_msg_buf, TEST_MSG_65, TEST_MSG_65_LEN);
+  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)mldsa_test_msg_buf,
                                    .len = TEST_MSG_65_LEN};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa65_sign_derand(&secret_key, msg, ctx,
@@ -1139,7 +1133,7 @@ static void test_mldsa65_derand(void) {
                                                sig_buf, mldsa_work_buffer));
   uint64_t time_1iter = profile_end(t0);
 
-  CHECK_ARRAYS_EQ((uint8_t *)signature, kMldsa65ExpectedSignature,
+  CHECK_ARRAYS_EQ((uint8_t *)mldsa_signature, kMldsa65ExpectedSignature,
                   kOtcryptoMldsa65SignatureBytes);
 
   LOG_INFO("1-iteration message signing time: %u cycles", (uint32_t)time_1iter);
@@ -1155,7 +1149,7 @@ static void test_mldsa65_derand(void) {
 
   LOG_INFO("Verifying...");
   hardened_bool_t verification_result;
-  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)signature,
+  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)mldsa_signature,
                                          .len = kOtcryptoMldsa65SignatureBytes};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa65_verify(
@@ -1169,19 +1163,11 @@ static void test_mldsa65_derand(void) {
 static void test_mldsa87_derand(void) {
   uint64_t t0;
 
-  uint32_t public_key_data[ceil_div(kOtcryptoMldsa87PublicKeyBytes,
-                                    sizeof(uint32_t))];
-  uint32_t secret_key_data[ceil_div(kOtcryptoMldsa87SecretKeyBytes,
-                                    sizeof(uint32_t)) *
-                           2];
-  uint32_t
-      signature[ceil_div(kOtcryptoMldsa87SignatureBytes, sizeof(uint32_t))];
-
   // Set up public key struct
   otcrypto_unblinded_key_t public_key = {
       .key_mode = kOtcryptoKeyModeMldsa87,
       .key_length = kOtcryptoMldsa87PublicKeyBytes,
-      .key = public_key_data,
+      .key = mldsa_public_key_data,
       .checksum = 0,
   };
 
@@ -1196,8 +1182,10 @@ static void test_mldsa87_derand(void) {
   };
   otcrypto_blinded_key_t secret_key = {
       .config = secret_key_config,
-      .keyblob_length = sizeof(secret_key_data),
-      .keyblob = secret_key_data,
+      .keyblob_length =
+          2 * ceil_div(kOtcryptoMldsa87SecretKeyBytes, sizeof(uint32_t)) *
+          sizeof(uint32_t),
+      .keyblob = mldsa_secret_key_data,
       .checksum = 0,
   };
 
@@ -1211,23 +1199,22 @@ static void test_mldsa87_derand(void) {
   profile_end_and_print(t0, "otcrypto_mldsa87_keypair_derand");
 
   LOG_INFO("Signing...");
-  uint32_t test_msg_buf[ceil_div(TEST_MSG_87_LEN, sizeof(uint32_t))];
-  uint32_t test_ctx_buf[ceil_div(TEST_CTX_LEN, sizeof(uint32_t))];
-  memcpy(test_msg_buf, TEST_MSG_87, TEST_MSG_87_LEN);
-  memcpy(test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
+  memcpy(mldsa_test_msg_buf, TEST_MSG_87, TEST_MSG_87_LEN);
+  memcpy(mldsa_test_ctx_buf, TEST_CTX, TEST_CTX_LEN);
 
-  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)test_ctx_buf,
+  otcrypto_const_byte_buf_t ctx = {.data = (const uint8_t *)mldsa_test_ctx_buf,
                                    .len = TEST_CTX_LEN};
   otcrypto_const_byte_buf_t rnd = {.data = kSignRnd, .len = sizeof(kSignRnd)};
-  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)signature,
-                                 .len = sizeof(signature)};
+  otcrypto_byte_buf_t sig_buf = {.data = (uint8_t *)mldsa_signature,
+                                 .len = sizeof(mldsa_signature)};
 
 #ifdef MLDSA_BENCHMARK_MODE
   // Benchmark 2-iteration message first
   uint64_t time_2iter;
-  memcpy(test_msg_buf, TEST_MSG_87_2ITER, TEST_MSG_87_2ITER_LEN);
-  otcrypto_const_byte_buf_t msg_2iter = {.data = (const uint8_t *)test_msg_buf,
-                                         .len = TEST_MSG_87_2ITER_LEN};
+  memcpy(mldsa_test_msg_buf, TEST_MSG_87_2ITER, TEST_MSG_87_2ITER_LEN);
+  otcrypto_const_byte_buf_t msg_2iter = {
+      .data = (const uint8_t *)mldsa_test_msg_buf,
+      .len = TEST_MSG_87_2ITER_LEN};
   time_2iter = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa87_sign_derand(&secret_key, msg_2iter, ctx,
                                                kOtcryptoMldsaSignModeMldsa, rnd,
@@ -1237,8 +1224,8 @@ static void test_mldsa87_derand(void) {
 #endif
 
   // Sign 1-iteration message
-  memcpy(test_msg_buf, TEST_MSG_87, TEST_MSG_87_LEN);
-  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)test_msg_buf,
+  memcpy(mldsa_test_msg_buf, TEST_MSG_87, TEST_MSG_87_LEN);
+  otcrypto_const_byte_buf_t msg = {.data = (const uint8_t *)mldsa_test_msg_buf,
                                    .len = TEST_MSG_87_LEN};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa87_sign_derand(&secret_key, msg, ctx,
@@ -1246,7 +1233,7 @@ static void test_mldsa87_derand(void) {
                                                sig_buf, mldsa_work_buffer));
   uint64_t time_1iter = profile_end(t0);
 
-  CHECK_ARRAYS_EQ((uint8_t *)signature, kMldsa87ExpectedSignature,
+  CHECK_ARRAYS_EQ((uint8_t *)mldsa_signature, kMldsa87ExpectedSignature,
                   kOtcryptoMldsa87SignatureBytes);
 
   LOG_INFO("1-iteration message signing time: %u cycles", (uint32_t)time_1iter);
@@ -1262,7 +1249,7 @@ static void test_mldsa87_derand(void) {
 
   LOG_INFO("Verifying...");
   hardened_bool_t verification_result;
-  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)signature,
+  otcrypto_const_byte_buf_t sig_const = {.data = (uint8_t *)mldsa_signature,
                                          .len = kOtcryptoMldsa87SignatureBytes};
   t0 = profile_start();
   CHECK_STATUS_OK(otcrypto_mldsa87_verify(
