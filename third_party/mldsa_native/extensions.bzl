@@ -13,9 +13,9 @@ def _mldsa_native_repos():
     http_archive(
         name = "mldsa_native",
         build_file = Label("//third_party/mldsa_native:BUILD.mldsa_native.bazel"),
-        sha256 = "02f22e4b4509abc1b7bc539d7a4522be950eed72551361884c939d450eb52790",
-        strip_prefix = "mldsa-native-3380c330162e2a998d9b5454ca1103ddac84c2e2",
+        sha256 = "23bcd38bc9d91e93c39df47189d6c4e5eb7172334700579c32951ff31857b9e5",
+        strip_prefix = "mldsa-native-421e6622f250f99da5b57660572e921c91cbfcf4",
         urls = [
-            "https://github.com/pq-code-package/mldsa-native/archive/3380c330162e2a998d9b5454ca1103ddac84c2e2.tar.gz",
+            "https://github.com/pq-code-package/mldsa-native/archive/421e6622f250f99da5b57660572e921c91cbfcf4.tar.gz",
         ],
     )
