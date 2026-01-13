@@ -95,9 +95,9 @@ otcrypto_status_t otcrypto_mldsa44_keypair_derand(
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
   memset(sk_share1, 0, kOtcryptoMldsa44SecretKeyBytes);
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa44WorkBufferKeypairWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa44WorkBufferKeypairWords,
+                         .offset_words = 0};
   int result = mldsa44_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
@@ -173,9 +173,9 @@ otcrypto_status_t otcrypto_mldsa44_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa44WorkBufferSignWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa44WorkBufferSignWords,
+                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa44_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
@@ -212,9 +212,9 @@ otcrypto_status_t otcrypto_mldsa44_verify(
     return OTCRYPTO_BAD_ARGS;
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa44WorkBufferVerifyWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa44WorkBufferVerifyWords,
+                         .offset_words = 0};
   int result = mldsa44_verify(signature.data, signature.len, message.data,
                               message.len, context.data, context.len,
                               (const uint8_t *)public_key->key, &ctx);
@@ -273,9 +273,9 @@ otcrypto_status_t otcrypto_mldsa65_keypair_derand(
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
   memset(sk_share1, 0, kOtcryptoMldsa65SecretKeyBytes);
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa65WorkBufferKeypairWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa65WorkBufferKeypairWords,
+                         .offset_words = 0};
   int result = mldsa65_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
@@ -351,9 +351,9 @@ otcrypto_status_t otcrypto_mldsa65_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa65WorkBufferSignWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa65WorkBufferSignWords,
+                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa65_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
@@ -390,9 +390,9 @@ otcrypto_status_t otcrypto_mldsa65_verify(
     return OTCRYPTO_BAD_ARGS;
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa65WorkBufferVerifyWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa65WorkBufferVerifyWords,
+                         .offset_words = 0};
   int result = mldsa65_verify(signature.data, signature.len, message.data,
                               message.len, context.data, context.len,
                               (const uint8_t *)public_key->key, &ctx);
@@ -451,9 +451,9 @@ otcrypto_status_t otcrypto_mldsa87_keypair_derand(
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
   memset(sk_share1, 0, kOtcryptoMldsa87SecretKeyBytes);
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa87WorkBufferKeypairWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa87WorkBufferKeypairWords,
+                         .offset_words = 0};
   int result = mldsa87_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
@@ -529,9 +529,9 @@ otcrypto_status_t otcrypto_mldsa87_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa87WorkBufferSignWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa87WorkBufferSignWords,
+                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa87_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
@@ -568,9 +568,9 @@ otcrypto_status_t otcrypto_mldsa87_verify(
     return OTCRYPTO_BAD_ARGS;
   }
 
-  mldsa_alloc_ctx_t ctx = {.base = work,
-                           .size_words = kOtcryptoMldsa87WorkBufferVerifyWords,
-                           .offset_words = 0};
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa87WorkBufferVerifyWords,
+                         .offset_words = 0};
   int result = mldsa87_verify(signature.data, signature.len, message.data,
                               message.len, context.data, context.len,
                               (const uint8_t *)public_key->key, &ctx);

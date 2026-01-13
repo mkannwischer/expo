@@ -135,17 +135,9 @@
  *
  *****************************************************************************/
 #if !defined(__ASSEMBLER__)
-#include <stddef.h>
-#include <stdint.h>
+#include "sw/device/lib/crypto/impl/mldsa/mldsa_native_alloc.h"
 
-// Bump allocator context
-typedef struct {
-  uint32_t *base;       // Base pointer to start of buffer
-  size_t size_words;    // Total size of buffer (in words)
-  size_t offset_words;  // Current offset into buffer (in words)
-} mldsa_alloc_ctx_t;
-
-#define MLD_CONFIG_CONTEXT_PARAMETER_TYPE mldsa_alloc_ctx_t *
+#define MLD_CONFIG_CONTEXT_PARAMETER_TYPE mld_alloc_ctx_t *
 
 /******************************************************************************
  * Name:        MLD_CONFIG_CUSTOM_ALLOC_FREE [EXPERIMENTAL]
@@ -184,27 +176,11 @@ typedef struct {
  *****************************************************************************/
 #define MLD_CONFIG_CUSTOM_ALLOC_FREE
 
-#define MLD_CUSTOM_ALLOC(v, T, N, context)                       \
-  T *(v);                                                        \
-  do {                                                           \
-    if ((context)->offset_words +                                \
-            (MLD_ALIGN_UP(sizeof(T) * (N)) / sizeof(uint32_t)) > \
-        (context)->size_words) {                                 \
-      (v) = NULL;                                                \
-    } else {                                                     \
-      (v) = (T *)((context)->base + (context)->offset_words);    \
-      (context)->offset_words +=                                 \
-          (MLD_ALIGN_UP(sizeof(T) * (N)) / sizeof(uint32_t));    \
-    }                                                            \
-  } while (0)
+#define MLD_CUSTOM_ALLOC(v, T, N, context) \
+  T *(v) = (T *)mld_alloc((context), sizeof(T) * (N))
 
-#define MLD_CUSTOM_FREE(v, T, N, context)                     \
-  do {                                                        \
-    if ((v) != NULL) {                                        \
-      (context)->offset_words -=                              \
-          (MLD_ALIGN_UP(sizeof(T) * (N)) / sizeof(uint32_t)); \
-    }                                                         \
-  } while (0)
+#define MLD_CUSTOM_FREE(v, T, N, context) \
+  mld_free((void *)(v), (context), sizeof(T) * (N))
 
 #endif
 

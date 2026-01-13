@@ -7,11 +7,15 @@ package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "mldsa_native",
-    srcs = ["mldsa_native_monobuild.c"],
+    srcs = [
+        "mldsa_native_monobuild.c",
+        "mldsa_native_alloc.c",
+    ],
     hdrs = [
         "mldsa_native_config.h",
         "fips202_glue.h",
         "mldsa_native_monobuild.h",
+        "mldsa_native_alloc.h",
     ],
     includes = ["."],
     deps = [
