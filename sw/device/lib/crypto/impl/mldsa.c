@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "sw/device/lib/base/hardened_memory.h"
 #include "sw/device/lib/base/math.h"
 #include "sw/device/lib/crypto/drivers/entropy.h"
 #include "sw/device/lib/crypto/impl/integrity.h"
@@ -18,11 +19,13 @@
 #define MODULE_ID MAKE_MODULE_ID('m', 'l', 'd')
 
 // Static assertions to verify buffer sizes match mldsa-native
+// (Sign buffers include extra space for unmasked secret key)
 _Static_assert(kOtcryptoMldsa44WorkBufferKeypairWords ==
                    MLD_TOTAL_ALLOC_44_KEYPAIR / 4,
                "ML-DSA-44 keypair work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa44WorkBufferSignWords ==
-                   MLD_TOTAL_ALLOC_44_SIGN / 4,
+                   (MLD_TOTAL_ALLOC_44_SIGN + kOtcryptoMldsa44SecretKeyBytes) /
+                       4,
                "ML-DSA-44 sign work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa44WorkBufferVerifyWords ==
                    MLD_TOTAL_ALLOC_44_VERIFY / 4,
@@ -32,7 +35,8 @@ _Static_assert(kOtcryptoMldsa65WorkBufferKeypairWords ==
                    MLD_TOTAL_ALLOC_65_KEYPAIR / 4,
                "ML-DSA-65 keypair work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa65WorkBufferSignWords ==
-                   MLD_TOTAL_ALLOC_65_SIGN / 4,
+                   (MLD_TOTAL_ALLOC_65_SIGN + kOtcryptoMldsa65SecretKeyBytes) /
+                       4,
                "ML-DSA-65 sign work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa65WorkBufferVerifyWords ==
                    MLD_TOTAL_ALLOC_65_VERIFY / 4,
@@ -42,7 +46,8 @@ _Static_assert(kOtcryptoMldsa87WorkBufferKeypairWords ==
                    MLD_TOTAL_ALLOC_87_KEYPAIR / 4,
                "ML-DSA-87 keypair work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa87WorkBufferSignWords ==
-                   MLD_TOTAL_ALLOC_87_SIGN / 4,
+                   (MLD_TOTAL_ALLOC_87_SIGN + kOtcryptoMldsa87SecretKeyBytes) /
+                       4,
                "ML-DSA-87 sign work buffer size mismatch");
 _Static_assert(kOtcryptoMldsa87WorkBufferVerifyWords ==
                    MLD_TOTAL_ALLOC_87_VERIFY / 4,
@@ -93,7 +98,8 @@ otcrypto_status_t otcrypto_mldsa44_keypair_derand(
   uint32_t *sk_share0;
   uint32_t *sk_share1;
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
-  memset(sk_share1, 0, kOtcryptoMldsa44SecretKeyBytes);
+  hardened_memshred(sk_share1,
+                    ceil_div(kOtcryptoMldsa44SecretKeyBytes, sizeof(uint32_t)));
 
   mld_alloc_ctx_t ctx = {.base = work,
                          .size_words = kOtcryptoMldsa44WorkBufferKeypairWords,
@@ -101,7 +107,8 @@ otcrypto_status_t otcrypto_mldsa44_keypair_derand(
   int result = mldsa44_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
-    memset(sk_share0, 0, kOtcryptoMldsa44SecretKeyBytes);
+    hardened_memshred(
+        sk_share0, ceil_div(kOtcryptoMldsa44SecretKeyBytes, sizeof(uint32_t)));
     return OTCRYPTO_FATAL_ERR;
   }
 
@@ -161,9 +168,22 @@ otcrypto_status_t otcrypto_mldsa44_sign_derand(
     return OTCRYPTO_BAD_ARGS;
   }
 
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa44WorkBufferSignWords,
+                         .offset_words = 0};
+
   // Unmask the key for the underlying implementation.
-  uint32_t sk[ceil_div(kOtcryptoMldsa44SecretKeyBytes, sizeof(uint32_t))];
-  HARDENED_TRY(keyblob_key_unmask(secret_key, ARRAYSIZE(sk), sk));
+  uint32_t *sk = (uint32_t *)mld_alloc(&ctx, kOtcryptoMldsa44SecretKeyBytes);
+  if (sk == NULL) {
+    return OTCRYPTO_FATAL_ERR;
+  }
+  size_t sk_words = ceil_div(kOtcryptoMldsa44SecretKeyBytes, sizeof(uint32_t));
+  status_t status = keyblob_key_unmask(secret_key, sk_words, sk);
+  if (status.value != kHardenedBoolTrue) {
+    hardened_memshred(sk, sk_words);
+    mld_free(sk, &ctx, kOtcryptoMldsa44SecretKeyBytes);
+    return status;
+  }
 
   uint32_t pre_buf[(2 + 255 + 3) / 4];
   uint8_t *pre = (uint8_t *)pre_buf;
@@ -173,13 +193,14 @@ otcrypto_status_t otcrypto_mldsa44_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mld_alloc_ctx_t ctx = {.base = work,
-                         .size_words = kOtcryptoMldsa44WorkBufferSignWords,
-                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa44_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
       2 + context.len, rnd.data, (const uint8_t *)sk, 0, &ctx);
+
+  hardened_memshred(sk, sk_words);
+  mld_free(sk, &ctx, kOtcryptoMldsa44SecretKeyBytes);
+
   if (result != 0) {
     return OTCRYPTO_FATAL_ERR;
   }
@@ -271,7 +292,8 @@ otcrypto_status_t otcrypto_mldsa65_keypair_derand(
   uint32_t *sk_share0;
   uint32_t *sk_share1;
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
-  memset(sk_share1, 0, kOtcryptoMldsa65SecretKeyBytes);
+  hardened_memshred(sk_share1,
+                    ceil_div(kOtcryptoMldsa65SecretKeyBytes, sizeof(uint32_t)));
 
   mld_alloc_ctx_t ctx = {.base = work,
                          .size_words = kOtcryptoMldsa65WorkBufferKeypairWords,
@@ -279,7 +301,8 @@ otcrypto_status_t otcrypto_mldsa65_keypair_derand(
   int result = mldsa65_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
-    memset(sk_share0, 0, kOtcryptoMldsa65SecretKeyBytes);
+    hardened_memshred(
+        sk_share0, ceil_div(kOtcryptoMldsa65SecretKeyBytes, sizeof(uint32_t)));
     return OTCRYPTO_FATAL_ERR;
   }
 
@@ -339,9 +362,22 @@ otcrypto_status_t otcrypto_mldsa65_sign_derand(
     return OTCRYPTO_BAD_ARGS;
   }
 
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa65WorkBufferSignWords,
+                         .offset_words = 0};
+
   // Unmask the key for the underlying implementation.
-  uint32_t sk[ceil_div(kOtcryptoMldsa65SecretKeyBytes, sizeof(uint32_t))];
-  HARDENED_TRY(keyblob_key_unmask(secret_key, ARRAYSIZE(sk), sk));
+  uint32_t *sk = (uint32_t *)mld_alloc(&ctx, kOtcryptoMldsa65SecretKeyBytes);
+  if (sk == NULL) {
+    return OTCRYPTO_FATAL_ERR;
+  }
+  size_t sk_words = ceil_div(kOtcryptoMldsa65SecretKeyBytes, sizeof(uint32_t));
+  status_t status = keyblob_key_unmask(secret_key, sk_words, sk);
+  if (status.value != kHardenedBoolTrue) {
+    hardened_memshred(sk, sk_words);
+    mld_free(sk, &ctx, kOtcryptoMldsa65SecretKeyBytes);
+    return status;
+  }
 
   uint32_t pre_buf[(2 + 255 + 3) / 4];
   uint8_t *pre = (uint8_t *)pre_buf;
@@ -351,13 +387,14 @@ otcrypto_status_t otcrypto_mldsa65_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mld_alloc_ctx_t ctx = {.base = work,
-                         .size_words = kOtcryptoMldsa65WorkBufferSignWords,
-                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa65_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
       2 + context.len, rnd.data, (const uint8_t *)sk, 0, &ctx);
+
+  hardened_memshred(sk, sk_words);
+  mld_free(sk, &ctx, kOtcryptoMldsa65SecretKeyBytes);
+
   if (result != 0) {
     return OTCRYPTO_FATAL_ERR;
   }
@@ -449,7 +486,8 @@ otcrypto_status_t otcrypto_mldsa87_keypair_derand(
   uint32_t *sk_share0;
   uint32_t *sk_share1;
   HARDENED_TRY(keyblob_to_shares(secret_key, &sk_share0, &sk_share1));
-  memset(sk_share1, 0, kOtcryptoMldsa87SecretKeyBytes);
+  hardened_memshred(sk_share1,
+                    ceil_div(kOtcryptoMldsa87SecretKeyBytes, sizeof(uint32_t)));
 
   mld_alloc_ctx_t ctx = {.base = work,
                          .size_words = kOtcryptoMldsa87WorkBufferKeypairWords,
@@ -457,7 +495,8 @@ otcrypto_status_t otcrypto_mldsa87_keypair_derand(
   int result = mldsa87_keypair_internal((uint8_t *)public_key->key,
                                         (uint8_t *)sk_share0, seed.data, &ctx);
   if (result != 0) {
-    memset(sk_share0, 0, kOtcryptoMldsa87SecretKeyBytes);
+    hardened_memshred(
+        sk_share0, ceil_div(kOtcryptoMldsa87SecretKeyBytes, sizeof(uint32_t)));
     return OTCRYPTO_FATAL_ERR;
   }
 
@@ -517,9 +556,22 @@ otcrypto_status_t otcrypto_mldsa87_sign_derand(
     return OTCRYPTO_BAD_ARGS;
   }
 
+  mld_alloc_ctx_t ctx = {.base = work,
+                         .size_words = kOtcryptoMldsa87WorkBufferSignWords,
+                         .offset_words = 0};
+
   // Unmask the key for the underlying implementation.
-  uint32_t sk[ceil_div(kOtcryptoMldsa87SecretKeyBytes, sizeof(uint32_t))];
-  HARDENED_TRY(keyblob_key_unmask(secret_key, ARRAYSIZE(sk), sk));
+  uint32_t *sk = (uint32_t *)mld_alloc(&ctx, kOtcryptoMldsa87SecretKeyBytes);
+  if (sk == NULL) {
+    return OTCRYPTO_FATAL_ERR;
+  }
+  size_t sk_words = ceil_div(kOtcryptoMldsa87SecretKeyBytes, sizeof(uint32_t));
+  status_t status = keyblob_key_unmask(secret_key, sk_words, sk);
+  if (status.value != kHardenedBoolTrue) {
+    hardened_memshred(sk, sk_words);
+    mld_free(sk, &ctx, kOtcryptoMldsa87SecretKeyBytes);
+    return status;
+  }
 
   uint32_t pre_buf[(2 + 255 + 3) / 4];
   uint8_t *pre = (uint8_t *)pre_buf;
@@ -529,13 +581,14 @@ otcrypto_status_t otcrypto_mldsa87_sign_derand(
     memcpy(pre + 2, context.data, context.len);
   }
 
-  mld_alloc_ctx_t ctx = {.base = work,
-                         .size_words = kOtcryptoMldsa87WorkBufferSignWords,
-                         .offset_words = 0};
   size_t signature_len;
   int result = mldsa87_signature_internal(
       signature.data, &signature_len, message.data, message.len, pre,
       2 + context.len, rnd.data, (const uint8_t *)sk, 0, &ctx);
+
+  hardened_memshred(sk, sk_words);
+  mld_free(sk, &ctx, kOtcryptoMldsa87SecretKeyBytes);
+
   if (result != 0) {
     return OTCRYPTO_FATAL_ERR;
   }

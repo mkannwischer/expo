@@ -42,15 +42,15 @@ enum {
 
   // Work buffer sizes in 32-bit words
   kOtcryptoMldsa44WorkBufferKeypairWords = 32992 / 4,
-  kOtcryptoMldsa44WorkBufferSignWords = 32448 / 4,
+  kOtcryptoMldsa44WorkBufferSignWords = (32448 + 2560) / 4,
   kOtcryptoMldsa44WorkBufferVerifyWords = 22464 / 4,
 
   kOtcryptoMldsa65WorkBufferKeypairWords = 46304 / 4,
-  kOtcryptoMldsa65WorkBufferSignWords = 44768 / 4,
+  kOtcryptoMldsa65WorkBufferSignWords = (44768 + 4032) / 4,
   kOtcryptoMldsa65WorkBufferVerifyWords = 30720 / 4,
 
   kOtcryptoMldsa87WorkBufferKeypairWords = 62688 / 4,
-  kOtcryptoMldsa87WorkBufferSignWords = 59104 / 4,
+  kOtcryptoMldsa87WorkBufferSignWords = (59104 + 4896) / 4,
   kOtcryptoMldsa87WorkBufferVerifyWords = 41216 / 4,
 };
 
