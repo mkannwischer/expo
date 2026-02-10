@@ -40,6 +40,7 @@ cc_library(
     deps = [
         ":integrity",
         ":keyblob",
+        "//sw/device/lib/base:crc32",
         "//sw/device/lib/base:hardened_memory",
         "//sw/device/lib/base:memory",
         "//sw/device/lib/crypto/drivers:aes",
@@ -244,6 +245,7 @@ cc_library(
     target_compatible_with = [OPENTITAN_CPU],
     deps = [
         ":status",
+        "//sw/device/lib/base:crc32",
         "//sw/device/lib/base:hardened",
         "//sw/device/lib/base:hardened_memory",
         "//sw/device/lib/crypto/drivers:hmac",
@@ -316,6 +318,7 @@ cc_library(
         ":integrity",
         ":keyblob",
         ":sha2",
+        "//sw/device/lib/base:crc32",
         "//sw/device/lib/base:hardened",
         "//sw/device/lib/base:hardened_memory",
         "//sw/device/lib/crypto/drivers:hmac",
