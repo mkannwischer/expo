@@ -65,7 +65,7 @@ static status_t run_test(const uint32_t *key, size_t key_len,
       .key_length = key_len,
       .hw_backed = kHardenedBoolFalse,
       .exportable = kHardenedBoolFalse,
-      .security_level = kOtcryptoKeySecurityLevelBase,
+      .security_level = kOtcryptoKeySecurityLevelPassiveRemote,
   };
 
   uint32_t keyblob[keyblob_num_words(config)];
