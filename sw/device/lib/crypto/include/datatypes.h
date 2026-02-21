@@ -410,22 +410,47 @@ typedef enum otcrypto_key_mode {
 /**
  * Enum to denote key security level.
  *
- * At high security levels, the crypto library will prioritize
- * protecting the key from sophisticated attacks, even at large
- * performance costs. If the security level is low, the crypto
- * library will still try to protect the key, but may forgo the
- * most costly protections against e.g. sophisticated physical
- * attacks.
+ * Presently there are only two security levels, indicating whether or not
+ * certain potentially costly side channel analysis (SCA) and fault injection
+ * (FI) mitigations should be employed.
  *
- * Values are hardened.
+ * Note that the enum values in this struct utilize sparse encoding to prevent
+ * downgrading attacks via FI.
+ *
+ * In order to support introduction of additional key security levels in the
+ * future while (a) maintaining backwards compatibility with respect to enum
+ * values and (b) maintaining the same minimum Hamming distance between enum
+ * values, we designate reserved enum variants as well that can be repurposed
+ * as needed.
+ *
+ * Encoding generated with:
+ * $ ./util/design/sparse-fsm-encode.py -d 5 -m 4 -n 8 \
+ *     -s 3296918321 --language=sv
+ *
+ * Minimum Hamming distance: 6
+ * Maximum Hamming distance: 8
+ * Minimum Hamming weight: 4
+ * Maximum Hamming weight: 8
  */
 typedef enum otcrypto_key_security_level {
-  // Security level low.
-  kOtcryptoKeySecurityLevelLow = 0x1e9,
-  // Security level medium.
-  kOtcryptoKeySecurityLevelMedium = 0xeab,
-  // Security level high.
-  kOtcryptoKeySecurityLevelHigh = 0xa7e,
+  // Key security level intended to mitigate passive remote attacks: timing
+  // side-channels are mitigated, but other side-channel and fault injection
+  // mitigations may be absent.
+  kOtcryptoKeySecurityLevelPassiveRemote = 0x7a8,
+  // Key security level intended to mitigate passive remote and passive physical
+  // attacks: timing as well as other side-channels are mitigated, but fault
+  // injection mitigations may be absent. This security level maintains all the
+  // mitigations of the prior passive remote security level.
+  kOtcryptoKeySecurityLevelPassivePhysical = 0x775,
+  // Key security level intended to mitigate passive remote, passive physical,
+  // and active physical attacks: side-channels (timing or otherwise) and fault
+  // injection mitigations are present. This security level maintains all the
+  // mitigations of the prior passive remote/physical security levels.
+  kOtcryptoKeySecurityLevelActivePhysical = 0x870,
+  // Reserved security level 0.
+  kOtcryptoKeySecurityReserved0 = 0x4fe,
+  // Reserved security level 1.
+  kOtcryptoKeySecurityReserved1 = 0x123,
 } otcrypto_key_security_level_t;
 
 /**
