@@ -10,10 +10,10 @@
 #include "sw/device/lib/base/memory.h"
 #include "sw/device/lib/base/random_order.h"
 #include "sw/device/lib/crypto/drivers/entropy.h"
+#include "sw/device/lib/crypto/drivers/kmac.h"
 #include "sw/device/lib/crypto/drivers/rv_core_ibex.h"
 #include "sw/device/lib/crypto/impl/integrity.h"
 #include "sw/device/lib/crypto/impl/status.h"
-#include "sw/device/lib/crypto/include/sha2.h"
 
 // Module ID for status codes.
 #define MODULE_ID MAKE_MODULE_ID('k', 'b', 'b')
@@ -55,31 +55,29 @@ size_t keyblob_share_num_words(const otcrypto_key_config_t config) {
   return ceil_div(len_bytes, sizeof(uint32_t));
 }
 
-size_t keyblob_num_words(const otcrypto_key_config_t config) {
+status_t keyblob_num_words(const otcrypto_key_config_t config,
+                           size_t *num_words) {
   if (launder32(config.hw_backed) == kHardenedBoolTrue) {
-    HARDENED_CHECK_EQ(config.hw_backed, kHardenedBoolTrue);
-    return kKeyblobHwBackedWords;
+    return OTCRYPTO_BAD_ARGS;
   }
   HARDENED_CHECK_NE(config.hw_backed, kHardenedBoolTrue);
-  return 2 * keyblob_share_num_words(config);
+  *num_words = 2 * keyblob_share_num_words(config);
+  return OTCRYPTO_OK;
 }
 
-/**
- * Check that the keyblob length matches expectations from the key config.
- *
- * Returns an OK status if the keyblob length is correct, a BAD_ARGS status
- * otherwise.
- *
- * @param key Blinded key.
- * @returns OK if the keyblob length is correct, BAD_ARGS otherwise.
- */
-OT_WARN_UNUSED_RESULT
-static status_t check_keyblob_length(const otcrypto_blinded_key_t *key) {
-  size_t num_words = keyblob_num_words(key->config);
-  if (launder32(key->keyblob_length) == num_words * sizeof(uint32_t)) {
-    HARDENED_CHECK_EQ(key->keyblob_length, num_words * sizeof(uint32_t));
-    HARDENED_CHECK_LE(key->keyblob_length / sizeof(uint32_t), num_words);
+status_t check_keyblob_length(const otcrypto_blinded_key_t *key) {
+  if (launder32(key->config.hw_backed) == kHardenedBoolTrue) {
+    HARDENED_CHECK_EQ(key->config.hw_backed, kHardenedBoolTrue);
     return OTCRYPTO_OK;
+  } else {
+    HARDENED_CHECK_EQ(key->config.hw_backed, kHardenedBoolFalse);
+    size_t num_words = 0;
+    keyblob_num_words(key->config, &num_words);
+    if (launder32(key->keyblob_length) == num_words * sizeof(uint32_t)) {
+      HARDENED_CHECK_EQ(key->keyblob_length, num_words * sizeof(uint32_t));
+      HARDENED_CHECK_LE(key->keyblob_length / sizeof(uint32_t), num_words);
+      return OTCRYPTO_OK;
+    }
   }
   return OTCRYPTO_BAD_ARGS;
 }
@@ -98,11 +96,19 @@ status_t keyblob_to_shares(const otcrypto_blinded_key_t *key, uint32_t **share0,
 status_t keyblob_from_shares(const uint32_t *share0, const uint32_t *share1,
                              const otcrypto_key_config_t config,
                              uint32_t *keyblob) {
+  // Ensure the key config is for a non-hardware backed key.
+  if (launder32(config.hw_backed) == kHardenedBoolTrue) {
+    return OTCRYPTO_BAD_ARGS;
+  }
+  HARDENED_CHECK_NE(config.hw_backed, kHardenedBoolTrue);
+
   // Entropy complex must be initialized for `hardened_memcpy`.
   HARDENED_TRY(entropy_complex_check());
 
   // Randomize the keyblob contents before writing shares.
-  hardened_memshred(keyblob, keyblob_num_words(config));
+  size_t num_words = 0;
+  HARDENED_TRY(keyblob_num_words(config, &num_words));
+  hardened_memshred(keyblob, num_words);
 
   size_t share_words = keyblob_share_num_words(config);
   hardened_memcpy(keyblob, share0, share_words);
@@ -120,40 +126,29 @@ status_t keyblob_buffer_to_keymgr_diversification(
   HARDENED_TRY(entropy_complex_check());
 
   // Initialize a streaming SHA-256 operation.
-  otcrypto_sha2_context_t ctx;
-  HARDENED_TRY(otcrypto_sha2_init(kOtcryptoHashModeSha256, &ctx));
+  HARDENED_TRY(kmac_sha3_256_begin());
 
   // Update the SHA-256 context with the provided keyblob.
   const uint32_t *keyblob_rest = keyblob + 1;
   uint32_t keyblob_rest_length = keyblob_length - sizeof(uint32_t);
-  otcrypto_const_byte_buf_t keyblob_rest_buf = {
-      .data = (uint8_t *)keyblob_rest,
-      .len = keyblob_rest_length,
-  };
-  HARDENED_TRY(otcrypto_sha2_update(&ctx, keyblob_rest_buf));
+  HARDENED_TRY(kmac_absorb((uint8_t *)keyblob_rest, keyblob_rest_length));
 
   // Update the SHA-256 context with the provided mode.
   uint32_t mode_data = launder32(mode);
-  otcrypto_const_byte_buf_t mode_buf = {
-      .data = (uint8_t *)&mode_data,
-      .len = sizeof(uint32_t),
-  };
-  HARDENED_TRY(otcrypto_sha2_update(&ctx, mode_buf));
+  HARDENED_TRY(kmac_absorb((uint8_t *)&mode_data, sizeof(uint32_t)));
 
   // Finalize the SHA-256 operation.
-  uint32_t digest_data[kKeymgrSaltNumWords];
-  otcrypto_hash_digest_t digest_buf = {
-      .data = digest_data,
-      .len = ARRAYSIZE(digest_data),
-  };
-  HARDENED_TRY(otcrypto_sha2_final(&ctx, &digest_buf));
+  uint32_t digest[kKeymgrSaltNumWords];
+  kmac_process();
+  HARDENED_TRY(kmac_squeeze_end(
+      kKeymgrSaltNumWords, /*read_masked=*/kHardenedBoolFalse, digest, NULL));
 
   // Copy the resulting digest into the salt.
-  hardened_memcpy(diversification->salt, digest_data, kKeymgrSaltNumWords);
+  hardened_memcpy(diversification->salt, digest, kKeymgrSaltNumWords);
 
   HARDENED_CHECK_EQ(diversification->version, keyblob[0]);
   HARDENED_CHECK_EQ(
-      hardened_memeq(diversification->salt, digest_data, kKeymgrSaltNumWords),
+      hardened_memeq(diversification->salt, digest, kKeymgrSaltNumWords),
       kHardenedBoolTrue);
   return OTCRYPTO_OK;
 }
@@ -166,10 +161,6 @@ status_t keyblob_to_keymgr_diversification(
     return OTCRYPTO_BAD_ARGS;
   }
   HARDENED_CHECK_EQ(key->config.hw_backed, kHardenedBoolTrue);
-
-  if (key->keyblob_length != kKeyblobHwBackedBytes) {
-    return OTCRYPTO_BAD_ARGS;
-  }
 
   return keyblob_buffer_to_keymgr_diversification(
       key->keyblob, key->keyblob_length, key->config.key_mode, diversification);
