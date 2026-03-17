@@ -60,6 +60,8 @@ AES_KWP_TESTVECTOR_TARGETS = [
     "//sw/host/cryptotest/testvectors/data:nist_cavp_aes_kwp_{}_{}_json".format(operation, key_len)
     for operation in ("ae", "ad")
     for key_len in ("128", "192", "256")
+] + [
+    "//sw/host/cryptotest/testvectors/data:wycheproof_aes_kwp_json",
 ]
 
 AES_KWP_TESTVECTOR_ARGS = " ".join([
