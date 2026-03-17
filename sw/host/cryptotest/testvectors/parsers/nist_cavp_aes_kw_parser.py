@@ -35,6 +35,17 @@ def parse_testcases(args) -> None:
             "result": True if "P" in test_vec else False,
         }
 
+        # Filter based on AES-KWP API requirements (see aes_kwp.h):
+        #   - aes_kwp_wrap: plaintext must be >= 16 bytes
+        #   - aes_kwp_unwrap: ciphertext must be >= 24 bytes
+        pt_len = len(testcase["plaintext"])
+        ct_len = len(testcase["ciphertext"])
+        if testcase["operation"] == "encrypt":
+            if pt_len < 16:
+                continue
+        else:
+            if ct_len < 24:
+                continue
         testcases.append(testcase)
 
     json_filename = args.dst
