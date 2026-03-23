@@ -267,7 +267,11 @@ jobs:
       - name: Prepare environment
         uses: ./.github/actions/prepare-env
       - name: Execute tests
-        run: ./bazelisk.sh test --test_tag_filters=-nightly //sw/acc/crypto/...
+        run: |
+          # Limit local number of test jobs to 4 to prevent memory contention
+          # from timing out tests.
+          ./bazelisk.sh test --test_tag_filters=-nightly \
+            --local_test_jobs=4 //sw/acc/crypto/...
 
   verilator_earlgrey:
     name: Verilated Earl Grey
